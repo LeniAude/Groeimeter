@@ -4754,7 +4754,7 @@ const STORAGE_PREFIX = 'groeimeter_v1_'; // followed by Moodle courseId
 // hebt. Reden: in september bleek een fix van 20 juli stilletjes verdwenen
 // omdat er twee bestandslijnen naast elkaar liepen en niets aan het
 // bestand verried welke build het was.
-const BUILD = '2026-10-12a';
+const BUILD = '2026-10-13a';
 
 // ============================================================
 // 3.2 MOODLE BRIDGE — placeholders
@@ -6685,8 +6685,10 @@ const LDS_COLUMNS = {
   bcVerpl:  ['bcverplicht'],
   ldCode:   ['ldcode'],
   ldText:   ['ldleerdoel', 'leerdoel'],
-  ldWeight: ['ldgewicht', 'gewicht']
+  ldWeight: ['ldgewicht', 'gewicht'],
+  ldActive: ['ldactief', 'actief']      // optioneel: ontbreekt = alles actief
 };
+const LDS_OPTIONAL = ['ldActive'];
 // Codes worden ook als id gebruikt (en dus in onclick-attributen elders in
 // de app). Daarom enkel veilige tekens: een code met een aanhalingsteken
 // zou anders code kunnen uitvoeren.
@@ -6719,8 +6721,9 @@ function gmParseCsv (text) {
 function ldsNorm (s) { return String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
 function ldsCodeKey (s) { return String(s ?? '').trim().toUpperCase(); }
 
-// Celtekst opkuisen. Letterlijke "\n" (backslash + n, overgehouden uit een
-// kopie uit een ander systeem) wordt een echte regelovergang.
+// Celtekst opkuisen. Regelovergangen in een cel (Alt+Enter) blijven
+// behouden. Een letterlijke "\n" (backslash + n) wordt voor de zekerheid
+// ook een regelovergang.
 function ldsCleanText (s) {
   return String(s ?? '')
     .replace(/\\n/g, '\n')
@@ -6770,13 +6773,13 @@ function ldsParseTab (rows) {
   const col = {}; const missing = [];
   Object.entries(LDS_COLUMNS).forEach(([k, names]) => {
     const i = head.findIndex(h => names.includes(h));
-    if (i < 0) missing.push(names[0]); else col[k] = i;
+    if (i < 0) { if (!LDS_OPTIONAL.includes(k)) missing.push(names[0]); } else col[k] = i;
   });
   if (missing.length) {
     throw new Error('Deze kolom(men) ontbreken in de sheet: ' + missing.join(', ')
       + '. Er is niets geïmporteerd.');
   }
-  const cell = (r, k) => String(r[col[k]] ?? '');
+  const cell = (r, k) => col[k] === undefined ? '' : String(r[col[k]] ?? '');
 
   const modules = []; const byName = new Map(); const tabErrors = [];
   const ldSeen = new Map();     // LD-code → rijnummer (over het hele tabblad)
@@ -6833,6 +6836,14 @@ function ldsParseTab (rows) {
       return;
     }
     ldSeen.set(lk, rowNr);
+    // Uitgeschakeld leerdoel (beheerpagina): code blijft gereserveerd voor de
+    // dubbelcontrole hierboven, maar het leerdoel wordt niet geïmporteerd.
+    if (col.ldActive !== undefined) {
+      const rawAct = cell(r, 'ldActive');
+      const act = rawAct.trim() === '' ? true : ldsParseBool(rawAct);
+      if (act === null) { mod.errors.push(`Rij ${rowNr}: LD-actief "${rawAct.trim()}" is geen ja of nee.`); return; }
+      if (act === false) { mod.inactiveCount = (mod.inactiveCount || 0) + 1; return; }
+    }
     if (!lk.startsWith(bk)) {
       mod.warnings.push(`Rij ${rowNr}: LD-code ${ldCode} begint niet met de BC-code ${bc.code}. Controleer of het leerdoel bij de juiste BC staat.`);
     }
