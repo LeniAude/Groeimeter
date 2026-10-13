@@ -575,6 +575,41 @@ input:focus, select:focus, textarea:focus, button:focus-visible {
   min-height: 80px;
 }
 
+/* ----- Cursisten plakken: voorbeeldscherm + lijst in Instellingen (okt 2026) ----- */
+.manual-students-hint { font-size: 11px; color: var(--text3); line-height: 1.5; margin: -4px 0 10px; }
+.paste-preview { margin-top: 12px; border: 1px solid var(--border2); border-radius: var(--radius-md); background: var(--bg); }
+.paste-preview-head { padding: 10px 12px; font-size: 12px; color: var(--text2); border-bottom: 1px solid var(--border); line-height: 1.5; }
+.paste-row { padding: 9px 12px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.paste-row:last-of-type { border-bottom: none; }
+.paste-row-who { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+.paste-row-name { font-weight: 500; color: var(--text); }
+.paste-row-mail { font-family: var(--font-mono); font-size: 12px; color: var(--text2); overflow-wrap: anywhere; }
+.paste-row-what { margin-top: 3px; font-size: 12px; color: var(--text2); line-height: 1.45; }
+.paste-row-what label { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
+.paste-row-what input { margin-top: 2px; }
+.paste-row.is-new  .paste-row-what { color: var(--success); }
+.paste-row.is-skip .paste-row-what { color: var(--text3); }
+.paste-row.is-error { background: var(--danger-light); }
+.paste-row.is-error .paste-row-what { color: var(--danger); }
+.paste-row-warn { margin-top: 3px; font-size: 12px; color: #8a6100; background: var(--warning-light); padding: 4px 8px; border-radius: var(--radius-sm); }
+.paste-summary { padding: 10px 12px; font-size: 12px; color: var(--text2); background: var(--bg2); border-top: 1px solid var(--border); }
+.paste-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border); }
+.stu-list { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 10px; }
+.stu-list summary { cursor: pointer; font-size: 13px; color: var(--text); padding: 6px 0; }
+.stu-row { padding: 10px 0; border-bottom: 1px solid var(--border); }
+.stu-row:last-child { border-bottom: none; }
+.stu-row-top { display: flex; align-items: center; gap: 12px; }
+.stu-row-main { flex: 1; min-width: 0; }
+.stu-row-name { font-size: 13px; color: var(--text); }
+.stu-row-sub { font-size: 11px; color: var(--text3); margin-top: 2px; overflow-wrap: anywhere; }
+.stu-row-sub .mono { font-family: var(--font-mono); }
+.stu-edit { margin-top: 10px; padding: 12px; background: var(--bg2); border-radius: var(--radius-md); display: grid; gap: 10px; }
+.stu-edit label { font-size: 12px; font-weight: 500; color: var(--text2); display: block; margin-bottom: 4px; }
+.stu-edit .input { width: 100%; }
+.stu-edit .mono { font-family: var(--font-mono); }
+.stu-edit-note { font-size: 11px; color: var(--text3); line-height: 1.5; margin-top: 4px; }
+.stu-edit-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
 /* Choice cards (used for grading type, aggregation, course rule) */
 .choice-group { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
 .choice {
@@ -3536,13 +3571,19 @@ body:not(.edit-mode) .weight-label { opacity: 0.7; }
         <div class="manual-students-block">
           <div class="manual-students-divider"><span>of voeg ze handmatig toe</span></div>
           <label class="manual-students-label" for="wizard-manual-names">
-            Plak hier de namen — één cursist per regel
+            Plak hier je cursisten — één per regel: <em>Naam; e-mail</em>, of alleen de naam
           </label>
           <textarea id="wizard-manual-names" class="textarea manual-students-textarea"
-                    rows="5" placeholder="Jan Janssens&#10;Fatima El Amrani&#10;Pieter De Vos&#10;…"></textarea>
-          <button class="btn btn-sm" onclick="wizardAddManualStudents()">
-            + Voeg cursisten toe
+                    rows="5" oninput="cancelStudentPaste('wizard', true)"
+                    placeholder="Fatima El Amrani; 365525@cursist.groeipunt.be&#10;Jan Peeters; 365531@cursist.groeipunt.be&#10;Pieter De Vos&#10;…"></textarea>
+          <p class="manual-students-hint">
+            Zonder e-mailadres krijgt een cursist later geen cursistendoc.
+            Het resultaat van "Cursisten opzoeken" kan je hier rechtstreeks plakken.
+          </p>
+          <button class="btn btn-sm" onclick="checkStudentPaste('wizard')">
+            Controleren
           </button>
+          <div id="wizard-paste-preview"></div>
         </div>
       </div>
 
@@ -4746,7 +4787,8 @@ window.GM_FONT_NOTOSANS_BOLD    = "AAEAAAAPAIAAAwBwR0RFRhJmDmAAAYBMAAAB5kdQT1NEd
 // ---- 3.1 CONFIG ---------------------------------------------
 // Schema version: bump this when the saved data shape changes so we
 // can migrate older saves. For Phase 1 we are at v1.
-const SCHEMA_VERSION = 2;   // v2 (sept 2026): settings.period + settings.release
+const SCHEMA_VERSION = 3;   // v2 (sept 2026): settings.period + settings.release
+                            // v3 (okt 2026): settings.docs (cursistendocs)
 const STORAGE_PREFIX = 'groeimeter_v1_'; // followed by Moodle courseId
 
 // Build-stempel: bij ELKE opgeleverde versie ophogen. Staat onderaan
@@ -4754,7 +4796,7 @@ const STORAGE_PREFIX = 'groeimeter_v1_'; // followed by Moodle courseId
 // hebt. Reden: in september bleek een fix van 20 juli stilletjes verdwenen
 // omdat er twee bestandslijnen naast elkaar liepen en niets aan het
 // bestand verried welke build het was.
-const BUILD = '2026-10-13a';
+const BUILD = '2026-10-13b';
 
 // ============================================================
 // 3.2 MOODLE BRIDGE — placeholders
@@ -4869,11 +4911,11 @@ const MOCK = {
   },
   currentUser: { id: 'u-7', role: 'teacher', name: 'Lieve Janssens' },
   students: [
-    { id: 's-101', firstName: 'Amira',  lastName: 'Boulahcen', fullName: 'Amira Boulahcen',  email: 'a.boulahcen@example.be' },
-    { id: 's-102', firstName: 'Benoît', lastName: 'Vanhove',   fullName: 'Benoît Vanhove',   email: 'b.vanhove@example.be' },
-    { id: 's-103', firstName: 'Carla',  lastName: 'De Witte',  fullName: 'Carla De Witte',   email: 'c.dewitte@example.be' },
-    { id: 's-104', firstName: 'Diego',  lastName: 'Hernández', fullName: 'Diego Hernández',  email: 'd.hernandez@example.be' },
-    { id: 's-105', firstName: 'Eva',    lastName: 'Peeters',   fullName: 'Eva Peeters',      email: 'e.peeters@example.be' }
+    { id: 's-101', firstName: 'Amira',  lastName: 'Boulahcen', fullName: 'Amira Boulahcen',  email: '300101@cursist.groeipunt.be' },
+    { id: 's-102', firstName: 'Benoît', lastName: 'Vanhove',   fullName: 'Benoît Vanhove',   email: '300102@cursist.groeipunt.be' },
+    { id: 's-103', firstName: 'Carla',  lastName: 'De Witte',  fullName: 'Carla De Witte',   email: '300103@cursist.groeipunt.be' },
+    { id: 's-104', firstName: 'Diego',  lastName: 'Hernández', fullName: 'Diego Hernández',  email: '300104@cursist.groeipunt.be' },
+    { id: 's-105', firstName: 'Eva',    lastName: 'Peeters',   fullName: 'Eva Peeters',      email: '300105@cursist.groeipunt.be' }
   ],
   // Basiscompetenties zoals Moodle ze levert (okt 2026): ENKEL de officiële
   // BC's, zonder leerdoelen. `code` = het veld waarin Moodle de BC-code
@@ -5164,9 +5206,30 @@ function migrateCourseData (data) {
   if (data.settings.release.forEndYMD === undefined) {
     data.settings.release.forEndYMD = null;
   }
+  // v3 — koppeling met Groeimeter cursistendocs. Ontbrekende velden worden
+  // altijd aangevuld, ongeacht schemaVersion (zelfde patroon als hierboven).
+  if (!data.settings.docs || typeof data.settings.docs !== 'object') {
+    data.settings.docs = blankDocsSettings();
+  } else {
+    const d0 = blankDocsSettings();
+    Object.keys(d0).forEach(k => { if (data.settings.docs[k] === undefined) data.settings.docs[k] = d0[k]; });
+  }
 
   data.schemaVersion = SCHEMA_VERSION;
   return data;
+}
+
+// v3 — lege koppeling met cursistendocs. Ingevuld vanaf bouw A2.
+function blankDocsSettings () {
+  return {
+    shortName:        null,   // geplakte Moodle-korte naam (alleen ter controle)
+    courseCode:       null,   // exact, hoofdlettergevoelig
+    schoolYear:       null,   // 'JJJJ-JJJJ'
+    schoolYearSource: null,   // 'shortname' | 'startdate'
+    confirmedAt:      null,   // ISO
+    lockedAt:         null,   // ISO — vergrendeld bij de eerste export
+    lastExportAt:     null    // ISO
+  };
 }
 
 // Build the empty-state shape used the first time a course opens.
@@ -5196,7 +5259,9 @@ function blankCourseData (courseId, courseName) {
       // Vrijgave van de eindresultaten door de leerkracht.
       // forEndYMD = de einddatum die gold op het moment van vrijgeven, zodat
       // we kunnen merken dat de periode nadien nog gewijzigd is.
-      release: { confirmed: false, atISO: null, by: null, forEndYMD: null }
+      release: { confirmed: false, atISO: null, by: null, forEndYMD: null },
+      // Koppeling met Groeimeter cursistendocs (v3).
+      docs:    blankDocsSettings()
     },
     students:        [],
     competencies:    [],  // parent (parentId = null) AND child entries
@@ -5760,6 +5825,15 @@ function assertSingleStudent (payload, studentId) {
     .filter(id => id && id !== studentId);
   if (others.length === 0) return;
 
+  // Ook het e-mailadres van een andere cursist mag er nergens in staan (bv. in
+  // feedback getypt). Hoofdletterongevoelig; het eigen adres telt niet.
+  const self = (App.data.students || []).find(x => x.id === studentId);
+  const ownEmail = normalizeEmail(self && self.email);
+  const otherEmails = (App.data.students || [])
+    .filter(x => x.id !== studentId)
+    .map(x => normalizeEmail(x.email))
+    .filter(e => e && e !== ownEmail);
+
   const escapeRe = t => String(t).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const probes = others.map(id => ({
     id: id,
@@ -5770,6 +5844,8 @@ function assertSingleStudent (payload, studentId) {
   (function walk (v) {
     if (typeof v === 'string') {
       probes.forEach(p => { if (p.re.test(v)) strays.push(p.id); });
+      const low = v.toLowerCase();
+      otherEmails.forEach(e => { if (low.indexOf(e) !== -1) strays.push(e); });
       return;
     }
     if (Array.isArray(v)) { v.forEach(walk); return; }
@@ -6276,7 +6352,7 @@ function reportsSettingsHtml () {
   });
 
   const rows = students.map(st => {
-    const name = st.fullName || ((st.firstName || '') + ' ' + (st.lastName || '')).trim();
+    const name = studentLabel(st);
     return '<div class="settings-row">'
          +   '<label class="reports-pick">'
          +     '<input type="checkbox" ' + (REPORT_SELECTION.has(st.id) ? 'checked ' : '')
@@ -6506,31 +6582,9 @@ function enterStepStudents () {
 // Manual add inside the welcome wizard. The wizard stages students in
 // App.wizard.importedStudents until the wizard completes, so we merge into
 // that array (creating it if Moodle import hasn't run yet).
-function wizardAddManualStudents () {
-  const ta  = document.getElementById('wizard-manual-names');
-  const raw = ta.value;
-  const existing = App.wizard.importedStudents || [];
-  const { toAdd, skipped, totalLines } = parseStudentNames(raw, existing);
-
-  if (totalLines === 0) {
-    toast('Plak eerst enkele namen (één per regel).', 'warning');
-    return;
-  }
-  if (toAdd.length === 0) {
-    toast('Geen nieuwe cursisten toegevoegd — allemaal al in de lijst.', 'info', 3000);
-    return;
-  }
-  App.wizard.importedStudents = existing.concat(toAdd);
-  ta.value = '';
-  enterStepStudents();
-  validateWizardStep();
-
-  let msg = toAdd.length + ' cursist' + (toAdd.length === 1 ? '' : 'en') + ' toegevoegd';
-  if (skipped.length > 0) {
-    msg += ' · ' + skipped.length + ' overgeslagen (dubbel)';
-  }
-  toast(msg, 'success', 3200);
-}
+// Handmatig toevoegen in de wizard en in Instellingen gaat via een
+// voorbeeldscherm (cursistendocs, bouw A1): eerst Controleren, dan Toevoegen.
+// De wizard verzamelt cursisten in App.wizard.importedStudents tot hij klaar is.
 
 async function wizardImportStudents () {
   const button = document.getElementById('btn-import-students');
@@ -7884,16 +7938,20 @@ function renderSettings () {
         Haalt de actuele cursistenlijst uit Moodle op. Nieuwe inschrijvingen worden toegevoegd,
         bestaande cursisten en hun gegevens blijven behouden.
       </p>
+      ${ studentWarningsHtml() }
       <div class="manual-students-block" style="margin-top:14px">
         <label class="manual-students-label" for="settings-manual-names">
-          Handmatig cursisten toevoegen — één naam per regel
+          Handmatig cursisten toevoegen — één per regel: <em>Naam; e-mail</em>, of alleen de naam
         </label>
         <textarea id="settings-manual-names" class="textarea manual-students-textarea"
-                  rows="4" placeholder="Jan Janssens&#10;Fatima El Amrani&#10;…"></textarea>
-        <button class="btn btn-sm" onclick="settingsAddManualStudents()">
-          + Voeg cursisten toe
+                  rows="4" oninput="cancelStudentPaste('settings', true)"
+                  placeholder="Fatima El Amrani; 365525@cursist.groeipunt.be&#10;Pieter De Vos&#10;…"></textarea>
+        <button class="btn btn-sm" onclick="checkStudentPaste('settings')">
+          Controleren
         </button>
+        <div id="settings-paste-preview"></div>
       </div>
+      ${ studentListHtml() }
     </div>
 
     <div class="settings-section">
@@ -7950,32 +8008,6 @@ function renderSettings () {
   `;
 }
 
-// Manual add from the settings modal — writes straight to live data.
-function settingsAddManualStudents () {
-  const ta  = document.getElementById('settings-manual-names');
-  const raw = ta.value;
-  const { toAdd, skipped, totalLines } = parseStudentNames(raw, App.data.students);
-
-  if (totalLines === 0) {
-    toast('Plak eerst enkele namen (één per regel).', 'warning');
-    return;
-  }
-  if (toAdd.length === 0) {
-    toast('Geen nieuwe cursisten toegevoegd — allemaal al in de lijst.', 'info', 3000);
-    return;
-  }
-  App.data.students = App.data.students.concat(toAdd);
-  if (!persist()) return;
-  ta.value = '';
-  renderSettings();   // refresh the count + clear the textarea
-  renderTeacher();    // update tabs/sidebar behind the modal
-
-  let msg = toAdd.length + ' cursist' + (toAdd.length === 1 ? '' : 'en') + ' toegevoegd';
-  if (skipped.length > 0) {
-    msg += ' · ' + skipped.length + ' overgeslagen (dubbel)';
-  }
-  toast(msg, 'success', 3200);
-}
 
 // Changing the grading type from the settings menu resets the thresholds
 // to defaults for the newly-chosen type (otherwise we end up with mismatched fields).
@@ -8445,12 +8477,12 @@ function renderTabs () {
               : status === 'partial' ? '<span class="tab-dot partial" title="Gedeeltelijk beoordeeld"></span>'
               : '';
     return '<button class="tab' + (active?' active':'') + '" onclick="selectStudent(\'' + escAttr(s.id) + '\')">'
-           + dot + escapeHtml(s.fullName) + '</button>';
+           + dot + escapeHtml(studentLabel(s)) + '</button>';
   }).join('');
 
   const cur = App.data.students.find(s => s.id === App.ui.activeStudentId);
   document.getElementById('sidebar-student-name').textContent =
-    classActive ? 'Klasoverzicht' : (cur ? cur.fullName : '—');
+    classActive ? 'Klasoverzicht' : (cur ? studentLabel(cur) : '—');
 }
 
 // "none" | "partial" | "full" — drives the tab dot
@@ -8714,7 +8746,7 @@ function renderClassMatrix (host) {
     parents.forEach(p => { table += '<th title="' + escAttr(p.name) + '">' + escapeHtml(p.name) + '</th>'; });
     table += '<th class="cm-col-sep">Cursus</th></tr></thead><tbody>';
     students.forEach((s, i) => {
-      table += '<tr><td class="cm-row-name" title="' + escAttr(s.fullName) + '">' + escapeHtml(s.fullName) + '</td>';
+      table += '<tr><td class="cm-row-name" title="' + escAttr(studentLabel(s)) + '">' + escapeHtml(studentLabel(s)) + '</td>';
       parents.forEach((p, j) => { table += '<td>' + cells[i][j].html + '</td>'; });
       table += '<td class="cm-col-sep">' + course[i].html + '</td></tr>';
     });
@@ -8723,7 +8755,7 @@ function renderClassMatrix (host) {
     table += '<td class="cm-col-sep">' + classCourse + '</td></tr>';
   } else {
     table += '<th class="cm-head-name">Competentie</th>';
-    students.forEach(s => { table += '<th title="' + escAttr(s.fullName) + '">' + escapeHtml(s.fullName) + '</th>'; });
+    students.forEach(s => { table += '<th title="' + escAttr(studentLabel(s)) + '">' + escapeHtml(studentLabel(s)) + '</th>'; });
     table += '<th class="cm-col-sep">Klas</th></tr></thead><tbody>';
     parents.forEach((p, j) => {
       table += '<tr><td class="cm-row-name" title="' + escAttr(p.name) + '">' + escapeHtml(p.name) + '</td>';
@@ -8861,7 +8893,7 @@ function computeCourseAnalysis () {
     });
     const cs = courseStatus(st.id);
     return {
-      id: st.id, name: st.fullName,
+      id: st.id, name: studentLabel(st),
       assessed: assessed, totalLeerdoelen: countingAll, absent: absent,
       passing: cs.passingCount, totalComp: cs.totalCount,
       state: cs.state, override: !!cs.override
@@ -9110,7 +9142,7 @@ function renderMain () {
 
     host.innerHTML =
         '<div class="overview-screen-header">'
-      +   '<h2>Competentie-overzicht ' + (cur ? '— ' + escapeHtml(cur.fullName) : '') + '</h2>'
+      +   '<h2>Competentie-overzicht ' + (cur ? '— ' + escapeHtml(studentLabel(cur)) : '') + '</h2>'
       +   '<p>Overzicht van alle competenties met hun huidige resultaat. Klik op een competentie om in detail te beoordelen.</p>'
       + '</div>'
       // ---- Course result summary card ----
@@ -9428,7 +9460,7 @@ function toggleCoursePass (studentId) {
   if (!requireEditMode('het cursusresultaat handmatig aan te passen')) return;
   if (!App.data.coursePassOverride) App.data.coursePassOverride = {};
   const cur = App.data.students.find(s => s.id === studentId);
-  const naam = cur ? cur.fullName : 'deze cursist';
+  const naam = cur ? studentLabel(cur) : 'deze cursist';
   const isOn = !!App.data.coursePassOverride[studentId];
   if (isOn) {
     if (!confirm('Handmatige markering "Geslaagd" verwijderen voor ' + naam + '?\nHet cursusresultaat volgt dan opnieuw de gewone regel.')) return;
@@ -9911,57 +9943,466 @@ window.addEventListener('beforeunload', () => {
 let SYNC_DRAFT = null;
 
 // ============================================================
-// 3.x MANUAL STUDENT ENTRY — paste names, one per line
+// 3.x MANUAL STUDENT ENTRY — "Naam; e-mail" of alleen een naam
 // ============================================================
-// Shared by the welcome wizard (step 1) and the settings modal.
-// Parses a textarea of names (one per line), builds student objects
-// with locally-generated ids, skips blanks and duplicates (by
-// case-insensitive fullName), and returns a summary.
+// Gedeeld door de wizard (stap 2) en Instellingen. Sinds okt 2026 (bouw A1)
+// met voorbeeldscherm, e-mail als sleutel en koppelen aan bestaande cursisten.
 //
 // Manually-added students get an id prefixed 'sm-' (student-manual)
 // so they're distinguishable from Moodle-synced ones ('s-...').
 // They carry a `manual: true` flag and won't be removed by a Moodle
 // sync (sync only adds Moodle students; it never deletes).
 // ============================================================
-function parseStudentNames (rawText, existingStudents) {
-  const lines = (rawText || '')
-    .split('\n')
-    .map(l => l.trim())
-    .filter(l => l.length > 0);
+// ----- Cursisten met e-mailadres (cursistendocs, bouw A1, okt 2026) -----
+// Een regel is "Naam; e-mail", "Voornaam<TAB>Achternaam<TAB>e-mail", of alleen
+// een naam (zoals vroeger). Het e-mailadres is de sleutel: twee cursisten met
+// dezelfde naam mogen nu allebei bestaan, zolang hun e-mailadres verschilt.
+// Niets wordt toegevoegd zonder voorbeeldscherm (checkStudentPaste).
+const CURSIST_EMAIL_RE  = /^[a-z0-9._%+-]+@cursist\.groeipunt\.be$/;
+const TEACHER_LABEL_MAX = 30;
+const PASTE_PREVIEW     = { wizard: null, settings: null };
+let   STU_EDIT_ID       = null;
+let   STU_ID_COUNTER    = 0;
 
-  // Build a lookup of existing names (case-insensitive) to detect dupes
-  const existingNames = new Set(
-    (existingStudents || []).map(s => (s.fullName || '').trim().toLowerCase())
-  );
+function normalizeEmail (v) { return String(v || '').trim().toLowerCase(); }
+function isCursistEmail (v) { return CURSIST_EMAIL_RE.test(normalizeEmail(v)); }
 
-  const toAdd       = [];
-  const skipped     = [];   // duplicates against existing OR within the paste
-  const seenInPaste = new Set();
+// Namen vergelijken zonder hoofdletters, accenten of dubbele spaties.
+function normName (v) {
+  return String(v || '')
+    .replace(/[ŁłĐđÐðÞþØøÆæŒœßİıĦħŦŧƵƶ]/g, ch => FILENAME_FOLD[ch] || ch)
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase().replace(/\s+/g, ' ').trim();
+}
 
-  lines.forEach(name => {
-    const key = name.toLowerCase();
-    if (existingNames.has(key) || seenInPaste.has(key)) {
-      skipped.push(name);
-      return;
+function studentFullName (st) {
+  if (!st) return '';
+  return st.fullName || ((st.firstName || '') + ' ' + (st.lastName || '')).trim();
+}
+
+// Naam zoals de LERAAR ze ziet. Nooit gebruiken in iets wat de cursist ziet
+// (cursistenweergave, pdf, export): het eigen kenmerk is een notitie van de
+// leraar. cursistReportData() gebruikt bewust fullName.
+function studentLabel (st, list) {
+  const name = studentFullName(st);
+  if (!st) return name;
+  const label = String(st.teacherLabel || '').trim();
+  if (label) return name + ' (' + label + ')';
+  const all  = list || (App.data && App.data.students) || [];
+  const key  = normName(name);
+  const same = all.filter(x => normName(studentFullName(x)) === key);
+  if (same.length < 2) return name;
+  return name + ' (' + studentSuffix(st, same) + ')';
+}
+
+// Laatste cijfers van het e-mailadres; meer tekens tot ze verschillen.
+function studentSuffix (st, same) {
+  const local = e => normalizeEmail(e).split('@')[0];
+  const mine  = local(st.email);
+  if (!mine) {
+    const noMail = same.filter(x => !local(x.email));
+    return noMail.length > 1 ? 'geen e-mail #' + (noMail.indexOf(st) + 1) : 'geen e-mail';
+  }
+  const others = same.filter(x => x !== st).map(x => local(x.email)).filter(Boolean);
+  for (let n = Math.min(3, mine.length); n <= mine.length; n++) {
+    const tail = mine.slice(-n);
+    if (!others.some(o => o.slice(-n) === tail)) return (n < mine.length ? '…' : '') + tail;
+  }
+  return mine;
+}
+
+// Groepen cursisten die hetzelfde e-mailadres delen (bv. na een Moodle-sync
+// waarin een handmatige cursist ook uit Moodle kwam).
+function duplicateEmailGroups (students) {
+  const map = new Map();
+  (students || []).forEach(st => {
+    const e = normalizeEmail(st.email);
+    if (!e) return;
+    if (!map.has(e)) map.set(e, []);
+    map.get(e).push(st);
+  });
+  return Array.from(map.entries()).filter(([, g]) => g.length > 1).map(([email, g]) => ({ email, students: g }));
+}
+
+// Splitst "Voornaam Achternaam" zoals vroeger: alles na de eerste spatie is achternaam.
+function splitName (nameParts) {
+  if (nameParts.length === 2) return { firstName: nameParts[0], lastName: nameParts[1] };
+  const words = nameParts.join(' ').split(/\s+/).filter(Boolean);
+  return { firstName: words[0] || '', lastName: words.slice(1).join(' ') };
+}
+
+// Leest het geplakte tekstvak. Wijzigt niets: geeft per regel terug wat er
+// zou gebeuren. action: 'new' | 'link' | 'skip' | 'error'.
+function parseStudentLines (rawText, existingStudents) {
+  const existing   = existingStudents || [];
+  const byEmail    = new Map();
+  existing.forEach(st => { const e = normalizeEmail(st.email); if (e) byEmail.set(e, st); });
+  const rows       = [];
+  const seenEmails = new Set();
+  const seenNames  = new Set();   // naamregels zonder e-mail
+  const linkTaken  = new Set();
+
+  String(rawText || '').split(/\r?\n/).forEach((raw, i) => {
+    const line = raw.trim();
+    if (!line) return;
+    const nr    = i + 1;
+    const parts = line.split(/[;\t]/).map(x => x.trim()).filter(Boolean);
+    const mails = parts.filter(x => x.indexOf('@') !== -1);
+    const names = parts.filter(x => x.indexOf('@') === -1);
+    const row   = { nr, input: line, name: '', firstName: '', lastName: '', email: '',
+                    action: 'error', reason: '', warn: '', linkTo: null, linkName: '', checked: true };
+
+    // Kopregel ("Naam; E-mail") overslaan.
+    if (mails.length === 0 && parts.length >= 2 && parts.some(x => /^e-?mail(adres)?$/i.test(x))) return;
+
+    if (parts.length > 3) {
+      row.reason = 'Te veel kolommen. Plak "Naam; e-mail" of het resultaat uit Cursisten opzoeken.';
+      rows.push(row); return;
     }
-    seenInPaste.add(key);
-    // Split into first / last name for consistency with Moodle students.
-    // Everything before the first space is the first name; the rest is
-    // the last name. Single-word names: lastName stays empty.
-    const parts     = name.split(/\s+/);
-    const firstName = parts[0];
-    const lastName  = parts.length > 1 ? parts.slice(1).join(' ') : '';
-    toAdd.push({
-      id:        'sm-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6),
-      firstName,
-      lastName,
-      fullName:  name,
-      email:     '',
-      manual:    true
-    });
+    if (mails.length > 1) {
+      row.reason = 'Meer dan één e-mailadres op deze regel.';
+      rows.push(row); return;
+    }
+
+    const nm = splitName(names);
+    row.firstName = nm.firstName;
+    row.lastName  = nm.lastName;
+    row.name      = (nm.firstName + ' ' + nm.lastName).trim();
+
+    if (mails.length === 1) {
+      const email = normalizeEmail(mails[0]);
+      row.email = email;
+      if (names.length === 0) {
+        row.reason = 'Alleen een e-mailadres. Zoek eerst de naam op en plak het resultaat ("Naam; e-mail").';
+        rows.push(row); return;
+      }
+      if (!isCursistEmail(email)) {
+        row.reason = 'Geen @cursist.groeipunt.be-adres. Kopieer de kolom met de @cursist-adressen.';
+        rows.push(row); return;
+      }
+      if (byEmail.has(email)) {
+        row.action = 'skip';
+        row.reason = 'Dit e-mailadres staat al in de lijst (' + studentFullName(byEmail.get(email)) + ').';
+        rows.push(row); return;
+      }
+      if (seenEmails.has(email)) {
+        row.action = 'skip';
+        row.reason = 'Staat twee keer in wat je plakte.';
+        rows.push(row); return;
+      }
+      seenEmails.add(email);
+
+      const key       = normName(row.name);
+      const sameName  = existing.filter(st => normName(studentFullName(st)) === key);
+      const linkable  = sameName.filter(st => st.manual && !normalizeEmail(st.email));
+      if (linkable.length === 1 && !linkTaken.has(linkable[0].id)) {
+        linkTaken.add(linkable[0].id);
+        row.action   = 'link';
+        row.linkTo   = linkable[0].id;
+        row.linkName = studentFullName(linkable[0]);
+      } else if (linkable.length > 1) {
+        row.action = 'skip';
+        row.reason = 'Meerdere cursisten zonder e-mail heten zo. Voeg het e-mailadres toe via '
+                   + 'Instellingen → Cursisten → Aanpassen.';
+      } else {
+        row.action = 'new';
+        if (sameName.length > 0) {
+          row.warn = 'Er is al een cursist met deze naam. Gaat het om twee verschillende personen?';
+        }
+      }
+      rows.push(row); return;
+    }
+
+    // Alleen een naam, zoals vroeger.
+    const key = normName(row.name);
+    if (existing.some(st => normName(studentFullName(st)) === key) || seenNames.has(key)) {
+      row.action = 'skip';
+      row.reason = 'Deze naam staat al in de lijst.';
+      rows.push(row); return;
+    }
+    seenNames.add(key);
+    row.action = 'new';
+    rows.push(row);
   });
 
-  return { toAdd, skipped, totalLines: lines.length };
+  // Twee nieuwe regels met dezelfde naam maar een ander e-mailadres: melden.
+  const newKeys = {};
+  rows.filter(r => (r.action === 'new' || r.action === 'link') && r.email)
+      .forEach(r => { const k = normName(r.name); newKeys[k] = (newKeys[k] || 0) + 1; });
+  rows.forEach(r => {
+    if (r.email && (r.action === 'new' || r.action === 'link') && newKeys[normName(r.name)] > 1 && !r.warn) {
+      r.warn = 'Deze naam staat meer dan één keer in wat je plakte. Gaat het om verschillende personen?';
+    }
+  });
+  return rows;
+}
+
+function newManualStudent (r) {
+  STU_ID_COUNTER++;
+  return {
+    id:        'sm-' + Date.now().toString(36) + STU_ID_COUNTER.toString(36) + '-'
+             + Math.random().toString(36).slice(2, 6),
+    firstName: r.firstName,
+    lastName:  r.lastName,
+    fullName:  r.name,
+    email:     r.email || '',
+    manual:    true
+  };
+}
+
+// Voert de regels uit op `students` (wordt aangepast). Een niet-aangevinkte
+// koppeling wordt een nieuwe cursist: de leraar zegt dan "niet dezelfde persoon".
+function applyStudentPaste (rows, students) {
+  let added = 0, linked = 0;
+  const taken = new Set(students.map(st => normalizeEmail(st.email)).filter(Boolean));
+  rows.forEach(r => {
+    if (r.action !== 'new' && r.action !== 'link') return;
+    if (r.email && taken.has(r.email)) return;           // vangnet tegen dubbels
+    if (r.action === 'link' && r.checked !== false) {
+      const t = students.find(st => st.id === r.linkTo);
+      if (t && !normalizeEmail(t.email)) {
+        t.email = r.email; taken.add(r.email); linked++;
+        return;
+      }
+    }
+    students.push(newManualStudent(r));
+    if (r.email) taken.add(r.email);
+    added++;
+  });
+  return { added, linked };
+}
+
+// ----- Voorbeeldscherm (wizard + Instellingen) -----
+function pasteListFor (ctx) {
+  return ctx === 'wizard' ? (App.wizard.importedStudents || []) : (App.data.students || []);
+}
+
+function checkStudentPaste (ctx) {
+  const ta = document.getElementById(ctx + '-manual-names');
+  const rows = parseStudentLines(ta ? ta.value : '', pasteListFor(ctx));
+  if (rows.length === 0) {
+    PASTE_PREVIEW[ctx] = null;
+    renderStudentPastePreview(ctx);
+    toast('Plak eerst enkele cursisten, één per regel.', 'warning');
+    return;
+  }
+  PASTE_PREVIEW[ctx] = rows;
+  renderStudentPastePreview(ctx);
+}
+
+function cancelStudentPaste (ctx, quiet) {
+  if (!PASTE_PREVIEW[ctx]) return;
+  PASTE_PREVIEW[ctx] = null;
+  renderStudentPastePreview(ctx);
+  if (!quiet) {
+    const ta = document.getElementById(ctx + '-manual-names');
+    if (ta) ta.focus();
+  }
+}
+
+function setPasteLink (ctx, idx, checked) {
+  const rows = PASTE_PREVIEW[ctx];
+  if (rows && rows[idx]) rows[idx].checked = !!checked;
+  renderStudentPastePreview(ctx);
+}
+
+function renderStudentPastePreview (ctx) {
+  const host = document.getElementById(ctx + '-paste-preview');
+  if (!host) return;
+  const rows = PASTE_PREVIEW[ctx];
+  if (!rows) { host.innerHTML = ''; return; }
+
+  const n = { new: 0, link: 0, skip: 0, error: 0, noMail: 0 };
+  rows.forEach(r => {
+    if (r.action === 'link' && r.checked === false) n.new++;
+    else n[r.action]++;
+    if ((r.action === 'new') && !r.email) n.noMail++;
+  });
+  const doable = n.new + n.link;
+
+  const body = rows.map((r, idx) => {
+    let what = '';
+    if (r.action === 'new') {
+      what = r.email ? '✓ Nieuw' : '✓ Nieuw, zonder e-mail (krijgt geen cursistendoc)';
+    } else if (r.action === 'link') {
+      what = '<label><input type="checkbox" ' + (r.checked !== false ? 'checked ' : '')
+           + 'onchange="setPasteLink(\'' + ctx + '\',' + idx + ',this.checked)">'
+           + '<span>🔗 Koppelen aan de bestaande cursist <strong>' + escapeHtml(r.linkName) + '</strong> '
+           + '(had nog geen e-mail). Zijn beoordelingen blijven behouden.'
+           + (r.checked === false ? ' <em>Niet aangevinkt: wordt een nieuwe cursist.</em>' : '')
+           + '</span></label>';
+    } else if (r.action === 'skip') {
+      what = '⏭ Overgeslagen: ' + escapeHtml(r.reason);
+    } else {
+      what = '⛔ Regel ' + r.nr + ': ' + escapeHtml(r.reason);
+    }
+    const cls  = r.action === 'error' ? 'is-error' : r.action === 'skip' ? 'is-skip' : 'is-new';
+    const who  = r.action === 'error' && !r.name && !r.email ? escapeHtml(r.input) : escapeHtml(r.name || '—');
+    return '<div class="paste-row ' + cls + '">'
+         +   '<div class="paste-row-who"><span class="paste-row-name">' + who + '</span>'
+         +     (r.email ? '<span class="paste-row-mail">' + escapeHtml(r.email) + '</span>' : '')
+         +   '</div>'
+         +   '<div class="paste-row-what">' + what + '</div>'
+         +   (r.warn ? '<div class="paste-row-warn">⚠️ ' + escapeHtml(r.warn) + '</div>' : '')
+         + '</div>';
+  }).join('');
+
+  const parts = [];
+  if (n.new)   parts.push(n.new + ' nieuw');
+  if (n.link)  parts.push(n.link + ' koppelen');
+  if (n.skip)  parts.push(n.skip + ' overgeslagen');
+  if (n.error) parts.push(n.error + ' met een fout');
+  const courseName = (App.data && App.data.courseName) || '';
+
+  host.innerHTML =
+      '<div class="paste-preview" role="region" aria-label="Voorbeeld van de cursisten">'
+    +   '<div class="paste-preview-head">Kijk na voor je toevoegt'
+    +     (courseName ? ' — cursus <strong>' + escapeHtml(courseName) + '</strong>' : '') + '.</div>'
+    +   body
+    +   '<div class="paste-summary">' + escapeHtml(parts.join(' · ')) + '</div>'
+    +   '<div class="paste-actions">'
+    +     '<button class="btn btn-sm" onclick="cancelStudentPaste(\'' + ctx + '\')">Annuleren</button>'
+    +     '<button class="btn btn-sm btn-primary" onclick="confirmStudentPaste(\'' + ctx + '\')"'
+    +       (doable === 0 ? ' disabled' : '') + '>'
+    +       (doable === 0 ? 'Niets toe te voegen' : 'Toevoegen (' + doable + ')') + '</button>'
+    +   '</div>'
+    + '</div>';
+}
+
+function confirmStudentPaste (ctx) {
+  const rows = PASTE_PREVIEW[ctx];
+  if (!rows) return;
+  let res;
+  if (ctx === 'wizard') {
+    const list = App.wizard.importedStudents || [];
+    res = applyStudentPaste(rows, list);
+    App.wizard.importedStudents = list;
+  } else {
+    res = applyStudentPaste(rows, App.data.students);
+    if (!persist()) return;
+  }
+  PASTE_PREVIEW[ctx] = null;
+  const ta = document.getElementById(ctx + '-manual-names');
+  if (ta) ta.value = '';
+  if (ctx === 'wizard') {
+    renderStudentPastePreview('wizard');
+    enterStepStudents();
+    validateWizardStep();
+  } else {
+    renderSettings();
+    renderTeacher();
+  }
+  const msg = [];
+  if (res.added)  msg.push(res.added + ' cursist' + (res.added === 1 ? '' : 'en') + ' toegevoegd');
+  if (res.linked) msg.push(res.linked + ' e-mailadres' + (res.linked === 1 ? '' : 'sen') + ' gekoppeld');
+  toast(msg.length ? msg.join(' · ') : 'Er is niets veranderd.', msg.length ? 'success' : 'info', 3200);
+}
+
+// ----- Instellingen → Cursisten: waarschuwingen en lijst -----
+function studentWarningsHtml () {
+  const groups = duplicateEmailGroups(App.data.students);
+  if (groups.length === 0) return '';
+  const items = groups.map(g => escapeHtml(g.students.map(st => studentFullName(st)).join(' en '))
+                              + ' (<span style="font-family:var(--font-mono)">' + escapeHtml(g.email) + '</span>)');
+  return '<div class="settings-warn" style="margin-top:12px">'
+       + '<strong>Dubbel e-mailadres.</strong> Deze cursisten hebben hetzelfde e-mailadres: '
+       + items.join('; ') + '. Waarschijnlijk staat één persoon er twee keer in. '
+       + 'Pas het e-mailadres van de handmatig toegevoegde cursist aan of maak het leeg.'
+       + '</div>';
+}
+
+function studentListHtml () {
+  const list = App.data.students || [];
+  if (list.length === 0) return '';
+  const withMail = list.filter(st => normalizeEmail(st.email)).length;
+  const rows = list.map(st => {
+    const mail = normalizeEmail(st.email);
+    const sub  = [];
+    sub.push(mail ? '<span class="mono">' + escapeHtml(mail) + '</span>' : 'geen e-mail');
+    if (mail && !isCursistEmail(mail)) sub.push('geen @cursist-adres');
+    sub.push(st.manual ? 'handmatig' : 'uit Moodle');
+    const editing = STU_EDIT_ID === st.id;
+    return '<div class="stu-row">'
+         +   '<div class="stu-row-top">'
+         +     '<div class="stu-row-main"><div class="stu-row-name">' + escapeHtml(studentLabel(st)) + '</div>'
+         +       '<div class="stu-row-sub">' + sub.join(' · ') + '</div></div>'
+         +     (editing ? '' : '<button class="btn btn-sm" onclick="openStudentEdit(\'' + escAttr(st.id) + '\')">Aanpassen</button>')
+         +   '</div>'
+         +   (editing ? studentEditHtml(st) : '')
+         + '</div>';
+  }).join('');
+  return '<details class="stu-list"' + (STU_EDIT_ID ? ' open' : '') + '>'
+       +   '<summary>Cursistenlijst bekijken en aanpassen (' + list.length + ' cursisten, '
+       +     withMail + ' met e-mailadres)</summary>'
+       +   rows
+       + '</details>';
+}
+
+function studentEditHtml (st) {
+  const mailInput = st.manual
+    ? '<input id="stu-edit-email" class="input mono" type="email" autocomplete="off" '
+      + 'value="' + escAttr(st.email || '') + '" placeholder="123456@cursist.groeipunt.be">'
+      + '<div class="stu-edit-note">Leeg laten mag: dan krijgt deze cursist geen cursistendoc.</div>'
+    : '<input id="stu-edit-email" class="input mono" type="email" value="' + escAttr(st.email || '') + '" disabled>'
+      + '<div class="stu-edit-note">Komt uit Moodle en kan hier niet aangepast worden.</div>';
+  return '<div class="stu-edit">'
+       +   '<div><label for="stu-edit-email">E-mailadres</label>' + mailInput + '</div>'
+       +   '<div><label for="stu-edit-label">Eigen kenmerk (alleen voor jou)</label>'
+       +     '<input id="stu-edit-label" class="input" type="text" maxlength="' + TEACHER_LABEL_MAX + '" '
+       +       'value="' + escAttr(st.teacherLabel || '') + '" placeholder="bv. Mo, of vooraan">'
+       +     '<div class="stu-edit-note">Verschijnt achter de naam in jouw schermen, nooit bij de cursist. '
+       +       'Handig als twee cursisten dezelfde naam hebben. Vul hier geen persoonlijke of gevoelige '
+       +       'informatie in (gezondheid, gedrag, …).</div></div>'
+       +   '<div class="stu-edit-actions">'
+       +     '<button class="btn btn-sm" onclick="closeStudentEdit()">Annuleren</button>'
+       +     '<button class="btn btn-sm btn-primary" onclick="saveStudentEdit(\'' + escAttr(st.id) + '\')">Opslaan</button>'
+       +   '</div>'
+       + '</div>';
+}
+
+function openStudentEdit (id)  { STU_EDIT_ID = id;   renderSettings(); }
+function closeStudentEdit ()   { STU_EDIT_ID = null; renderSettings(); }
+
+function saveStudentEdit (id) {
+  const st = (App.data.students || []).find(x => x.id === id);
+  if (!st) { closeStudentEdit(); return; }
+  const mailEl  = document.getElementById('stu-edit-email');
+  const labelEl = document.getElementById('stu-edit-label');
+
+  const label = String(labelEl ? labelEl.value : '').replace(/[\r\n\t]+/g, ' ').trim().slice(0, TEACHER_LABEL_MAX);
+
+  let newMail = normalizeEmail(st.email);
+  if (st.manual && mailEl) {
+    newMail = normalizeEmail(mailEl.value);
+    if (newMail && !isCursistEmail(newMail)) {
+      toast('Dit is geen @cursist.groeipunt.be-adres.', 'warning', 3600);
+      return;
+    }
+    const clash = (App.data.students || []).find(x => x.id !== id && normalizeEmail(x.email) === newMail);
+    if (newMail && clash) {
+      toast('Dit e-mailadres hoort al bij ' + studentLabel(clash) + '.', 'warning', 3600);
+      return;
+    }
+    const oldMail = normalizeEmail(st.email);
+    if (oldMail && oldMail !== newMail) {
+      const docs = App.data.settings && App.data.settings.docs;
+      if (docs && docs.lastExportAt) {
+        const ok = confirm('Het cursistendoc van het oude adres (' + oldMail + ') blijft bestaan.\n'
+                         + 'Bij je volgende export krijg je in de webapp de vraag of de toegang voor dat '
+                         + 'adres ingetrokken moet worden.\n\nE-mailadres toch wijzigen?');
+        if (!ok) return;
+        st.previousEmails = Array.from(new Set((st.previousEmails || []).concat([oldMail])));
+      }
+    }
+  }
+
+  st.email = newMail;
+  if (label) st.teacherLabel = label; else delete st.teacherLabel;
+  if (!persist()) return;
+  STU_EDIT_ID = null;
+  renderSettings();
+  renderTeacher();
+  toast('Cursist bijgewerkt.', 'success', 2200);
 }
 
 async function syncCursisten () {
@@ -10472,7 +10913,7 @@ function renderAssessGrid () {
   } else {
     students.forEach(s => {
       html += '<th>'
-            + '<span class="assess-cell-name">' + escapeHtml(s.fullName) + '</span>'
+            + '<span class="assess-cell-name">' + escapeHtml(studentLabel(s)) + '</span>'
             + '</th>';
     });
   }
@@ -10487,8 +10928,8 @@ function renderAssessGrid () {
     if (rowsAreStudents) {
       const cur = outer;
       const allAbsent = innerList.every(l => (ASSESS.grades[cur.id + '_' + l.id] || {}).absent);
-      html += '<td class="row-head" title="' + escAttr(cur.fullName) + '">'
-            +   '<span class="assess-cell-name">' + escapeHtml(cur.fullName) + '</span>'
+      html += '<td class="row-head" title="' + escAttr(studentLabel(cur)) + '">'
+            +   '<span class="assess-cell-name">' + escapeHtml(studentLabel(cur)) + '</span>'
             +   '<button class="grade-mini-btn ' + (allAbsent ? 'absent-on' : '') + '"'
             +   ' style="margin-top:3px;display:inline-block"'
             +   ' onclick="assessMarkWholeStudentAbsent(\'' + escAttr(cur.id) + '\')">'
@@ -10561,7 +11002,7 @@ function renderAssessScaleView (leerdo, students) {
          +   (isAbsent
                 ? '<span class="scale-student-cross">×</span>'
                 : '<span class="scale-student-dot"></span>')
-         +   escapeHtml(s.fullName)
+         +   escapeHtml(studentLabel(s))
          + '</button>';
   }).join('');
 
@@ -10578,7 +11019,7 @@ function renderAssessScaleView (leerdo, students) {
     +     ' onclick="scaleToggleCursistAbsent()"'
     +     ' title="' + (isAllAbsent
                          ? 'Klik om deze cursist terug aanwezig te markeren'
-                         : 'Markeer ' + activeStudent.fullName + ' als afwezig voor deze hele beoordeling') + '">'
+                         : 'Markeer ' + studentLabel(activeStudent) + ' als afwezig voor deze hele beoordeling') + '">'
     +       '<span class="scale-absent-icon">' + (isAllAbsent ? '×' : '?') + '</span>'
     +       'afwezig'
     +     '</button>'
@@ -10670,13 +11111,13 @@ function renderAssessScaleView (leerdo, students) {
     const nextIdx = SCALE_ACTIVE.studentIdx + 1;
     const allAbsent = isAllAbsent;
     const summary = allAbsent
-      ? '✓ ' + escapeHtml(activeStudent.fullName) + ' is gemarkeerd als afwezig voor deze beoordeling.'
-      : '✓ Alle leerdoelen ingevuld voor ' + escapeHtml(activeStudent.fullName) + '.';
+      ? '✓ ' + escapeHtml(studentLabel(activeStudent)) + ' is gemarkeerd als afwezig voor deze beoordeling.'
+      : '✓ Alle leerdoelen ingevuld voor ' + escapeHtml(studentLabel(activeStudent)) + '.';
     if (nextIdx < students.length) {
       doneBanner = '<div class="scale-done-banner">'
                  + '<span>' + summary + '</span>'
                  + '<button class="scale-done-banner-next" onclick="scaleSelectStudent(' + nextIdx + ')">'
-                 +   'Volgende cursist: ' + escapeHtml(students[nextIdx].fullName) + ' →'
+                 +   'Volgende cursist: ' + escapeHtml(studentLabel(students[nextIdx])) + ' →'
                  + '</button>'
                  + '</div>';
     } else {
@@ -10775,8 +11216,8 @@ function scaleToggleCursistAbsent () {
   });
   renderAssessGrid();
   toast(wasAbsent
-        ? s.fullName + ' is terug aanwezig.'
-        : s.fullName + ' is gemarkeerd als afwezig voor deze beoordeling.', 'info', 2200);
+        ? studentLabel(s) + ' is terug aanwezig.'
+        : studentLabel(s) + ' is gemarkeerd als afwezig voor deze beoordeling.', 'info', 2200);
 }
 // Apply a 0..3 score to the active leerdoel.
 function scaleApplyScore (segIdx, advance) {
@@ -10819,7 +11260,7 @@ function scaleQuickFill (segIdx) {
   // Guard: if cursist is currently marked fully absent, don't silently
   // overwrite that. Ask the teacher to un-mark first.
   if (scaleIsCursistAbsent(s.id, leerdo)) {
-    toast(s.fullName + ' is gemarkeerd als afwezig. Klik eerst "× afwezig" om dat ongedaan te maken.', 'warning', 3000);
+    toast(studentLabel(s) + ' is gemarkeerd als afwezig. Klik eerst "× afwezig" om dat ongedaan te maken.', 'warning', 3000);
     return;
   }
   let filled = 0;
