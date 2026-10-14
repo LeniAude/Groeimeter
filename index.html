@@ -4827,7 +4827,7 @@ const STORAGE_PREFIX = 'groeimeter_v1_'; // followed by Moodle courseId
 // hebt. Reden: in september bleek een fix van 20 juli stilletjes verdwenen
 // omdat er twee bestandslijnen naast elkaar liepen en niets aan het
 // bestand verried welke build het was.
-const BUILD = '2026-10-14b';
+const BUILD = '2026-10-14c';
 
 // ============================================================
 // 3.2 MOODLE BRIDGE — placeholders
@@ -13620,8 +13620,13 @@ function renderCursistContent () {
 // Read-only teacher feedback shown to the cursist. Returns '' when there
 // is nothing, so empty levels add no clutter. (No input/edit/delete — the
 // cursist only reads.)
+// Feedback bij een gearchiveerde test is voor de cursist weg, net als de test
+// zelf (okt 2026; zelfde regel als het pdf-rapport). De leraar ziet ze nog.
+function cursistFeedbackVisible (f) {
+  return !!f && !(f.sourceTestId && isTestArchived(f.sourceTestId));
+}
 function renderCursistFeedback (key, title) {
-  const history = (App.data.feedback || {})[key] || [];
+  const history = ((App.data.feedback || {})[key] || []).filter(cursistFeedbackVisible);
   if (history.length === 0) return '';
   return '<div class="cursist-feedback">'
        +   '<div class="cursist-feedback-title">' + escapeHtml(title) + '</div>'
@@ -13646,11 +13651,12 @@ function renderCursistFeedbackItem (f) {
 }
 // True when there is at least one feedback item under this key.
 function cursistHasFeedback (key) {
-  return ((App.data.feedback || {})[key] || []).length > 0;
+  return ((App.data.feedback || {})[key] || []).filter(cursistFeedbackVisible).length > 0;
 }
 // Renders a pre-collected list of feedback items under one titled block.
 function renderCursistFeedbackItems (items, title) {
-  if (!items || items.length === 0) return '';
+  items = (items || []).filter(cursistFeedbackVisible);
+  if (items.length === 0) return '';
   return '<div class="cursist-feedback">'
        +   '<div class="cursist-feedback-title">' + escapeHtml(title) + '</div>'
        +   items.map(renderCursistFeedbackItem).join('')
@@ -13661,7 +13667,7 @@ function renderCursistFeedbackItems (items, title) {
 function renderCursistFeedbackMulti (keys, title) {
   const seen = new Set();
   const all  = [];
-  keys.forEach(k => ((App.data.feedback || {})[k] || []).forEach(f => {
+  keys.forEach(k => ((App.data.feedback || {})[k] || []).filter(cursistFeedbackVisible).forEach(f => {
     if (seen.has(f.id)) return;
     seen.add(f.id); all.push(f);
   }));
