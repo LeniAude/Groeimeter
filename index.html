@@ -4827,7 +4827,7 @@ const STORAGE_PREFIX = 'groeimeter_v1_'; // followed by Moodle courseId
 // hebt. Reden: in september bleek een fix van 20 juli stilletjes verdwenen
 // omdat er twee bestandslijnen naast elkaar liepen en niets aan het
 // bestand verried welke build het was.
-const BUILD = '2026-10-14a';
+const BUILD = '2026-10-14b';
 
 // ============================================================
 // 3.2 MOODLE BRIDGE — placeholders
@@ -5890,13 +5890,65 @@ function assertSingleStudent (payload, studentId) {
 }
 
 // ----- Gegevens verzamelen -------------------------------------------
+// ----- Testenlijst van één cursist (gedeeld: app én rapport) -------------
+// Groepeert de EIGEN, niet-gearchiveerde beoordelingen van de cursist per
+// (naam, datum) en koppelt waar mogelijk aan een echt App.data.tests-record.
+// Zo verschijnt elke beoordeling, ook bij oude of onvolledige testgegevens.
+function cursistTestList (studentId) {
+  const groups = new Map();
+  App.data.competencies.filter(c => c.parentId).forEach(l => {
+    activeEntries(App.data.grades[studentId + '_' + l.id] || []).forEach(e => {
+      const dateYMD = (e.sourceDate || '').slice(0, 10);
+      const key     = (e.sourceName || 'Onbekend') + '__' + dateYMD;
+      if (!groups.has(key)) {
+        groups.set(key, { name: e.sourceName || 'Onbekend', date: dateYMD,
+                          isMoodle: e.sourceType === 'moodle', leerdoelIds: new Set(), matchedTest: null });
+      }
+      groups.get(key).leerdoelIds.add(l.id);
+    });
+  });
+  (App.data.tests || []).forEach(t => {
+    const key = (t.title || '') + '__' + (t.date || '').slice(0, 10);
+    if (groups.has(key)) {
+      groups.get(key).matchedTest = t;
+      groups.get(key).isMoodle = !!t.moodleSource;
+    }
+  });
+  const tests = Array.from(groups.values()).map(g => ({
+    id:          g.matchedTest ? g.matchedTest.id : ('synth__' + g.name + '__' + g.date),
+    title:       g.matchedTest ? g.matchedTest.title : g.name,
+    date:        g.date,
+    isMoodle:    g.isMoodle,
+    leerdoelIds: g.matchedTest ? g.matchedTest.leerdoelIds : Array.from(g.leerdoelIds),
+    matchedTest: g.matchedTest
+  }));
+  tests.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  return tests;
+}
+
+// De beoordeling van één cursist voor één leerdoel binnen één test.
+function cursistTestEntry (studentId, test, leerdoelId) {
+  const entries = App.data.grades[studentId + '_' + leerdoelId] || [];
+  return entries.find(e => {
+    if (test.matchedTest && e.testId && e.testId === test.id) return true;
+    if (e.sourceName !== test.title) return false;
+    return (e.sourceDate || '').slice(0, 10) === test.date;
+  }) || null;
+}
+
 function cursistReportData (studentId) {
   const st = (App.data.students || []).find(x => x.id === studentId);
   if (!st) throw new Error('Onbekende cursist.');
 
-  const fbFor = key => ((App.data.feedback && App.data.feedback[key]) || [])
-    .filter(f => f && f.text)
-    .map(f => ({ text: String(f.text), date: f.date || null }));
+  const tests     = cursistTestList(studentId);
+  const testTitle = id => { const t = (App.data.tests || []).find(x => x.id === id); return t ? t.title : null; };
+  const inList    = new Set(tests.filter(t => t.matchedTest).map(t => t.id));
+
+  // Feedback bij een gearchiveerde test is weg voor de cursist, net als de test.
+  const keep  = f => f && f.text && !(f.sourceTestId && isTestArchived(f.sourceTestId));
+  const shape = f => ({ text: String(f.text), date: f.date || null,
+                        source: f.sourceTestId ? testTitle(f.sourceTestId) : null });
+  const fbFor = key => ((App.data.feedback && App.data.feedback[key]) || []).filter(keep).map(shape);
 
   const all     = App.data.competencies || [];
   const parents = all.filter(c => !c.parentId);
@@ -5904,20 +5956,44 @@ function cursistReportData (studentId) {
   const competencies = parents.map(p => {
     const kids = all.filter(c => c.parentId === p.id);
     return {
-      name:      p.name,
-      mandatory: !!(p.mandatory || p.nonNegotiable),
-      score:     parentScore(studentId, p.id),
-      feedback:  fbFor('parent_' + studentId + '_' + p.id),
+      name:        p.name,
+      description: p.description || '',
+      mandatory:   !!(p.mandatory || p.nonNegotiable),
+      score:       parentScore(studentId, p.id),
+      feedback:    fbFor('parent_' + studentId + '_' + p.id),
       leerdoelen: kids.map(k => {
         const w = (k.weight !== undefined && k.weight !== null) ? k.weight : (100 / kids.length);
+        // Feedback die bij een test in "Mijn beoordelingen" hoort, staat
+        // ALLEEN daar (afspraak okt 2026: korter rapport).
+        const fb = ((App.data.feedback && App.data.feedback['leerdoel_' + studentId + '_' + k.id]) || [])
+          .filter(keep).filter(f => !(f.sourceTestId && inList.has(f.sourceTestId))).map(shape);
         return {
-          name:     k.name,
-          counts:   w > 0,          // gewicht 0 = bewust niet meegeteld
-          score:    leerdoelScore(studentId, k.id),
-          feedback: fbFor('leerdoel_' + studentId + '_' + k.id)
+          name:        k.name,
+          description: k.description || '',
+          counts:      w > 0,          // gewicht 0 = bewust niet meegeteld
+          score:       leerdoelScore(studentId, k.id),
+          feedback:    fb
         };
       })
     };
+  });
+
+  const testsOut = tests.map(t => {
+    const fbTest = t.matchedTest ? fbFor('entry_' + studentId + '_' + t.id) : [];
+    const lds = t.leerdoelIds.map(lId => {
+      const l = all.find(c => c.id === lId);
+      if (!l) return null;
+      const e = cursistTestEntry(studentId, t, lId);
+      const seen = new Set(), fb = [];
+      const add = arr => arr.filter(keep).forEach(f => { if (!seen.has(f.id)) { seen.add(f.id); fb.push(shape(f)); } });
+      if (e) add((App.data.feedback || {})['entry_' + studentId + '_' + e.id] || []);
+      if (t.matchedTest) {
+        add(((App.data.feedback || {})['leerdoel_' + studentId + '_' + lId] || [])
+              .filter(f => f.sourceTestId && f.sourceTestId === t.id));
+      }
+      return { name: l.name, entry: e ? { absent: !!e.absent, score: e.absent ? null : e.score } : null, feedback: fb };
+    }).filter(Boolean);
+    return { title: t.title, dateYMD: t.date, isMoodle: !!t.isMoodle, feedback: fbTest, leerdoelen: lds };
   });
 
   // Afwezigheden per TEST tellen, niet per leerdoel: één gemiste test die drie
@@ -5942,6 +6018,7 @@ function cursistReportData (studentId) {
                      passingCount: cs.passingCount, totalCount: cs.totalCount },
     courseFeedback: fbFor('course_' + studentId),
     competencies:  competencies,
+    tests:         testsOut,
     absences:      absentTests.size
   };
 
@@ -5992,16 +6069,31 @@ const COURSE_STATE_LABEL = {
   pending: 'Nog niet beoordeeld'
 };
 
-// ----- Rapport als blokken (bouw A2, okt 2026) -------------------------
+// ----- Rapport als blokken (bouw A2, uitgebreid okt 2026: v2) -----------
 // Eén opbouw, twee weergaven: het pdf hieronder én het cursistendoc (webapp)
-// tekenen dezelfde blokken. Alle omzetting naar woorden (formatScore,
-// COURSE_STATE_LABEL) gebeurt HIER, zodat het doc nooit eigen regels krijgt
-// die uit de pas lopen met de app. Volgorde = leesvolgorde.
-const REPORT_VIEW_VERSION = 1;
+// tekenen dezelfde blokken. Opbouw zoals de cursistenweergave, zonder
+// zelfinschatting. Alle omzetting naar woorden gebeurt HIER.
+const REPORT_VIEW_VERSION = 2;
+
+// Zelfde woorden als de vorderingsbalk in de cursistenweergave (zonder emoji:
+// die staan niet in het lettertype van het pdf).
+function progressWord (state, pct) {
+  if (state === 'pass') return 'Proficiat, je bent geslaagd voor de cursus!';
+  if (pct >= 70) return 'Je bent er bijna! Nog een laatste inspanning.';
+  if (pct >  0)  return 'Goed bezig — blijf zo verder oefenen!';
+  return 'Je begint eraan — elke beoordeling telt.';
+}
 
 function cursistReportView (studentId) {
   const d = cursistReportData(studentId);
   const B = [];
+  const fbBlock = (f, level, hideSource) => {
+    const meta = [];
+    if (f.source && f.source !== hideSource) meta.push('Bij ' + f.source);
+    if (f.date)   meta.push(formatYMD(String(f.date).slice(0, 10)));
+    B.push({ t: 'feedback', level: level, text: f.text, meta: meta.join(' · ') || null });
+  };
+
   B.push({ t: 'name',   text: d.student.fullName });
   B.push({ t: 'course', text: d.course.name || '' });
   B.push({ t: 'meta',
@@ -6010,31 +6102,73 @@ function cursistReportView (studentId) {
              : 'Cursusperiode niet ingesteld',
            generatedYMD: d.generatedYMD });
   B.push({ t: 'stamp',  kind: d.released.confirmed ? 'definitief' : 'voorlopig' });
-  B.push({ t: 'total',  text: 'Resultaat van de cursus',
-           right: COURSE_STATE_LABEL[d.status.state] || '—', cls: d.status.state,
-           sub: d.status.passingCount + ' van de ' + d.status.totalCount + ' competenties behaald.'
-              + (d.status.override ? ' Dit resultaat is een beslissing van de lesgever.' : '') });
+
+  // Vorderingsbalk over de COMPETENTIES, zoals in de app. Geen percentage.
+  if (d.status.state === 'pending') {
+    B.push({ t: 'progress', fill: null, cls: 'pending', word: 'Nog geen beoordelingen ontvangen.' });
+  } else {
+    const pct  = d.status.totalCount > 0 ? Math.round(d.status.passingCount / d.status.totalCount * 100) : 0;
+    const fill = d.status.override ? 100 : pct;
+    B.push({ t: 'progress', fill: fill, cls: d.status.state === 'pass' ? 'pass' : 'progress',
+             word: progressWord(d.status.state, pct) });
+  }
+
+  // Formeel resultaat pas na de vrijgave (afspraak okt 2026).
+  if (d.released.confirmed) {
+    B.push({ t: 'total', text: 'Resultaat van de cursus',
+             right: COURSE_STATE_LABEL[d.status.state] || '—', cls: d.status.state,
+             sub: d.status.passingCount + ' van de ' + d.status.totalCount + ' competenties behaald.'
+                + (d.status.override ? ' Dit resultaat is een beslissing van de lesgever.' : '') });
+  }
   if (d.absences > 0) {
     B.push({ t: 'para', text: 'Afwezig bij ' + d.absences + (d.absences === 1 ? ' beoordeling.' : ' beoordelingen.') });
   }
-  d.courseFeedback.forEach(f => {
-    B.push({ t: 'feedback', level: 0, text: f.text,
-             date: f.date ? formatYMD(String(f.date).slice(0, 10)) : null });
-  });
+  if (d.courseFeedback.length) {
+    B.push({ t: 'label', level: 0, text: 'Feedback van je leerkracht' });
+    d.courseFeedback.forEach(f => fbBlock(f, 0));
+  }
+
   B.push({ t: 'section', text: 'Competenties' });
   d.competencies.forEach(comp => {
     const cf = formatScore(comp.score);
     B.push({ t: 'comp', text: comp.name, note: comp.mandatory ? 'verplicht te behalen' : null,
-             right: cf.label, cls: cf.class });
-    comp.feedback.forEach(f => B.push({ t: 'feedback', level: 1, text: f.text }));
+             desc: comp.description || null, right: cf.label, cls: cf.class });
     comp.leerdoelen.forEach(ld => {
       const lf = formatScore(ld.score);
-      B.push({ t: 'ld', text: ld.name, note: ld.counts ? null : 'telt niet mee',
+      B.push({ t: 'ld', text: ld.name, note: ld.counts ? null : 'telt niet mee', desc: ld.description || null,
                right: ld.counts ? lf.label : '—', cls: ld.counts ? lf.class : 'muted' });
-      ld.feedback.forEach(f => B.push({ t: 'feedback', level: 2, text: f.text }));
+      ld.feedback.forEach(f => fbBlock(f, 2));
     });
+    if (comp.feedback.length) {
+      B.push({ t: 'label', level: 1, text: 'Feedback over deze competentie' });
+      comp.feedback.forEach(f => fbBlock(f, 1));
+    }
     B.push({ t: 'compEnd' });
   });
+
+  B.push({ t: 'section', text: 'Mijn beoordelingen' });
+  if (d.tests.length === 0) {
+    B.push({ t: 'para', text: 'Je hebt nog geen beoordelingen ontvangen.' });
+  }
+  d.tests.forEach(t => {
+    const n = t.leerdoelen.length;
+    B.push({ t: 'test', text: t.title,
+             meta: formatYMD(t.dateYMD) + ' · ' + n + (n === 1 ? ' leerdoel' : ' leerdoelen') + (t.isMoodle ? ' · uit Moodle' : '') });
+    if (t.feedback.length) {
+      B.push({ t: 'label', level: 1, text: 'Feedback over deze test' });
+      t.feedback.forEach(f => fbBlock(f, 1, t.title));
+    }
+    t.leerdoelen.forEach(ld => {
+      let right, cls;
+      if (!ld.entry)           { right = '—';       cls = 'pending'; }
+      else if (ld.entry.absent){ right = 'afwezig'; cls = 'fail'; }
+      else { const f = formatScore(ld.entry.score); right = f.label; cls = f.class; }
+      B.push({ t: 'tld', text: ld.name, right: right, cls: cls });
+      ld.feedback.forEach(f => fbBlock(f, 2, t.title));
+    });
+    B.push({ t: 'testEnd' });
+  });
+
   const view = { version: REPORT_VIEW_VERSION, blocks: B };
   // Wat de cursist echt ziet, wordt nog eens gecontroleerd.
   assertSingleStudent({ student: { id: studentId }, blocks: B }, studentId);
@@ -6057,6 +6191,7 @@ function generateCursistReport (studentId) {
     text2: [74, 79, 85],
     text3: [128, 134, 140],
     brand: [0, 154, 155],
+    brandDark: [0, 121, 122],
     pass:  [29, 158, 117],
     fail:  [209, 74, 62],
     warn:  [224, 163, 25],
@@ -6145,8 +6280,50 @@ function generateCursistReport (studentId) {
   font('normal', 8, C.brand);
   doc.text('GROEIMETER', ML, y); y += 7;
 
-  let compIndex = 0;
-  built.view.blocks.forEach(b => {
+  // Vorderingsbalk: zelfde kleurverloop als in de app (rood → oranje → groen
+  // over de hele breedte; de vulling toont het stuk tot waar de cursist is).
+  // Geslaagd = volledig groen. Getekend in smalle stroken, want jsPDF kent
+  // geen verloop.
+  const lerp = (a, b, t) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
+  const gradAt = t => t < 0.5 ? lerp(C.fail, C.warn, t / 0.5) : lerp(C.warn, C.pass, (t - 0.5) / 0.5);
+  const progressBar = b => {
+    const BH = 4.2;
+    need(BH + 12);
+    doc.setFillColor(239, 241, 243);
+    doc.roundedRect(ML, y, CW, BH, BH / 2, BH / 2, 'F');
+    if (b.fill !== null && b.fill !== undefined) {
+      const shown = Math.max(8, b.fill) / 100 * CW;
+      if (b.cls === 'pass') {
+        doc.setFillColor.apply(doc, C.pass);
+        doc.roundedRect(ML, y, shown, BH, BH / 2, BH / 2, 'F');
+      } else {
+        const step = 0.6;
+        for (let x = 0; x < shown; x += step) {
+          doc.setFillColor.apply(doc, gradAt(x / CW));
+          doc.rect(ML + x, y, Math.min(step + 0.05, shown - x), BH, 'F');
+        }
+      }
+    }
+    y += BH + 5;
+    font('bold', 10.5, b.cls === 'pass' ? C.pass : C.brandDark);
+    doc.splitTextToSize(b.word, CW).forEach(l => { doc.text(l, ML, y); y += 5; });
+    y += 1.5;
+  };
+
+  const fbIndent = level => level === 2 ? 12 : 4;
+  const feedback = b => {
+    const ind = fbIndent(b.level);
+    need(9);
+    if (b.meta) para(b.meta, { size: 7.5, color: C.text3, indent: ind, rule: true });
+    para(b.text, { size: b.level === 2 ? 8.5 : 9.5, color: C.text2, indent: ind, rule: true, gap: 1.5 });
+  };
+
+  // Een regel nooit alleen onderaan een pagina laten staan als er feedback
+  // of een omschrijving op volgt: dan samen naar de volgende pagina.
+  const blocks = built.view.blocks;
+  const keepNext = i => { const n = blocks[i + 1]; return n && (n.t === 'feedback' || n.t === 'label') ? 12 : 0; };
+  blocks.forEach((b, i) => {
+    const prev = blocks[i - 1];
     switch (b.t) {
       case 'name':
         font('bold', 19, C.text);
@@ -6165,51 +6342,69 @@ function generateCursistReport (studentId) {
           doc.text('VOORLOPIG — de lesgever heeft de eindresultaten nog niet bevestigd.', ML, y);
           y += 6;
         }
+        hr(6);
+        break;
+      case 'progress':
+        progressBar(b);
         break;
       case 'total':
-        hr(6);
-        font('bold', 13, C.text);
+        need(14);
+        y += 1;
+        font('bold', 12, C.text);
         doc.text(b.text, ML, y);
-        font('bold', 13, stateColor(b.cls));
+        font('bold', 12, stateColor(b.cls));
         doc.text(b.right, W - MR, y, { align: 'right' });
-        y += 6.5;
+        y += 5.5;
         para(b.sub, { size: 9.5, color: C.text2, gap: 2 });
         break;
       case 'para':
         para(b.text, { size: 9.5, color: C.text2, gap: 2 });
         break;
+      case 'label':
+        need(10);
+        y += 1;
+        para(b.text, { size: 8.5, style: 'bold', color: C.text2, indent: b.level === 0 ? 0 : 4, gap: 0.8 });
+        break;
       case 'feedback':
-        if (b.level === 0) {
-          para(b.text, { size: 9.5, color: C.text2, indent: 4, rule: true });
-          if (b.date) para(b.date, { size: 7.5, color: C.text3, indent: 4, rule: true, gap: 1.5 });
-        } else if (b.level === 1) {
-          para(b.text, { size: 9, color: C.text2, indent: 4, rule: true, gap: 1.5 });
-        } else {
-          para(b.text, { size: 8.5, color: C.text3, indent: 12, rule: true, gap: 1 });
-        }
+        feedback(b);
         break;
       case 'section':
-        y += 3;
-        hr(6);
+        // Na een competentie of test staat er al een lijn: geen tweede.
+        if (prev && (prev.t === 'compEnd' || prev.t === 'testEnd')) { y += 2; }
+        else { y += 3; hr(6); }
         font('bold', 13, C.text);
         need(9);
         doc.text(b.text, ML, y);
         y += 7;
         break;
       case 'comp':
-        need(14);
-        if (compIndex > 0) y += 2;
-        compIndex++;
+        need(16 + keepNext(i));
         row(withNote(b), b.right, { size: 11, style: 'bold', rightColor: scoreColor(b.cls) });
+        if (b.desc) para(b.desc, { size: 8.5, color: C.text3 });
         y += 1.5;
         break;
       case 'ld':
+        need(8 + keepNext(i));
         row(withNote(b), b.right,
-            { size: 9.5, indent: 8, color: C.text2, rightColor: scoreColor(b.cls) });
+            { size: 9.5, indent: 4, color: C.text, rightColor: scoreColor(b.cls) });
+        if (b.desc) para(b.desc, { size: 8, color: C.text3, indent: 4 });
+        y += 0.8;
+        break;
+      case 'test':
+        need(16 + keepNext(i));
+        row(b.text, null, { size: 10.5, style: 'bold' });
+        if (b.meta) para(b.meta, { size: 8, color: C.text3, gap: 1 });
+        y += 0.5;
+        break;
+      case 'tld':
+        need(7 + keepNext(i));
+        row(b.text, b.right, { size: 9.5, indent: 4, color: C.text, rightColor: scoreColor(b.cls) });
+        y += 0.5;
         break;
       case 'compEnd':
+      case 'testEnd':
         y += 2;
-        hr(3);
+        hr(4);
         break;
     }
   });
@@ -13622,61 +13817,9 @@ function cursistToggleLeerdoel (leerdoelId) {
 }
 
 function renderCursistTests (studentId) {
-  // ----- Build the cursist's "Mijn beoordelingen" list -----
-  // Instead of filtering App.data.tests (which can lose entries when ids
-  // don't line up — old data, mock seeders, etc.) we group the cursist's
-  // OWN grade entries by (sourceName, sourceDate) and build a synthetic
-  // test row per group. This guarantees every evaluation the cursist has
-  // shows up here, even if App.data.tests is incomplete or stale.
-  //
-  // If there IS a matching App.data.tests record, we use it for nicer
-  // metadata (id for the detail modal, moodleSource icon). Otherwise we
-  // build a stand-in test object from the entries themselves.
-
-  const groups = new Map();  // key = "<sourceName>__<dateYMD>" → { entries, name, date, leerdoelIds }
-  const allLeerdoelen = App.data.competencies.filter(c => c.parentId);
-
-  allLeerdoelen.forEach(l => {
-    const entries = activeEntries(App.data.grades[studentId + '_' + l.id] || []);
-    entries.forEach(e => {
-      const dateYMD = (e.sourceDate || '').slice(0, 10);
-      const key     = (e.sourceName || 'Onbekend') + '__' + dateYMD;
-      if (!groups.has(key)) {
-        groups.set(key, {
-          name:        e.sourceName || 'Onbekend',
-          date:        dateYMD,
-          isMoodle:    e.sourceType === 'moodle',
-          leerdoelIds: new Set(),
-          matchedTest: null
-        });
-      }
-      groups.get(key).leerdoelIds.add(l.id);
-    });
-  });
-
-  // Match each group to a real App.data.tests record when possible so
-  // we can use its testId in the detail modal — otherwise build a
-  // synthetic id from name+date.
-  (App.data.tests || []).forEach(t => {
-    const key = (t.title || '') + '__' + (t.date || '').slice(0, 10);
-    if (groups.has(key)) {
-      groups.get(key).matchedTest = t;
-      groups.get(key).isMoodle = !!t.moodleSource;
-    }
-  });
-
-  // Convert to array, newest date first
-  const tests = Array.from(groups.values()).map(g => ({
-    // Use real test id when available; otherwise a synthetic key the
-    // detail modal can still locate the entries with.
-    id:          g.matchedTest ? g.matchedTest.id : ('synth__' + g.name + '__' + g.date),
-    title:       g.matchedTest ? g.matchedTest.title : g.name,
-    date:        g.date,
-    isMoodle:    g.isMoodle,
-    leerdoelIds: g.matchedTest ? g.matchedTest.leerdoelIds : Array.from(g.leerdoelIds),
-    matchedTest: g.matchedTest
-  }));
-  tests.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  // De lijst komt uit cursistTestList(): dezelfde bron als het pdf-rapport,
+  // zodat app en rapport nooit een andere set beoordelingen tonen.
+  const tests = cursistTestList(studentId);
 
   if (tests.length === 0) {
     return '<div class="cursist-tests-section">'
