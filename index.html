@@ -610,6 +610,31 @@ input:focus, select:focus, textarea:focus, button:focus-visible {
 .stu-edit-note { font-size: 11px; color: var(--text3); line-height: 1.5; margin-top: 4px; }
 .stu-edit-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
+/* ----- Cursistendocs (bouw A2) ----- */
+.docs-code-block { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); }
+.docs-code-input { width: 100%; font-family: var(--font-mono); font-size: 12px; }
+.docs-code { font-family: var(--font-mono); font-size: 13px; letter-spacing: .3px; overflow-wrap: anywhere; color: var(--text); }
+.docs-code-result { margin-top: 8px; display: grid; gap: 4px; font-size: 13px; color: var(--text2); }
+.docs-k { display: inline-block; min-width: 92px; color: var(--text3); font-size: 12px; }
+.docs-src { color: var(--text3); font-size: 12px; }
+.docs-src-warn { color: #8a6100; }
+.docs-code-error { margin-top: 8px; font-size: 12px; color: var(--danger); line-height: 1.5; }
+.docs-confirm { display: flex; gap: 8px; align-items: flex-start; margin-top: 6px; padding: 9px 12px; background: var(--brand-lighter);
+                border: 1px solid var(--brand-light); border-radius: var(--radius-md); font-size: 13px; cursor: pointer; }
+.docs-confirm input { margin-top: 3px; }
+.docs-lock { margin-top: 4px; font-size: 12px; color: var(--text2); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.docs-intro { font-size: 11px; color: var(--text2); line-height: 1.6; margin-bottom: 10px; }
+.docs-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.docs-summary { margin-top: 12px; font-size: 12px; color: var(--text2); }
+.docs-nodoc { margin-top: 6px; font-size: 12px; color: var(--text2); }
+.docs-nodoc summary { cursor: pointer; }
+.docs-nodoc ul, .docs-problems { margin: 6px 0 0 18px; font-size: 12px; line-height: 1.6; }
+.docs-problems { color: #8a6100; }
+.docs-steps { margin: 10px 0 0 18px; font-size: 11px; color: var(--text3); line-height: 1.6; }
+.docs-last { margin-top: 6px; font-size: 11px; color: var(--text3); }
+.docs-notice { margin-top: 12px; padding: 10px 12px; background: var(--success-light); border: 1px solid var(--success);
+               border-radius: var(--radius-md); font-size: 12px; color: var(--text2); line-height: 1.6; }
+
 /* Choice cards (used for grading type, aggregation, course rule) */
 .choice-group { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
 .choice {
@@ -3549,6 +3574,12 @@ body:not(.edit-mode) .weight-label { opacity: 0.7; }
 
         <div class="period-error" id="wizard-period-error" style="display:none"></div>
         <div class="period-note"  id="wizard-period-note"  style="display:none"></div>
+
+        <div class="docs-code-block">
+          <div class="manual-students-label">Cursuscode voor cursistendocs <span class="period-hint">(optioneel — alleen als je cursisten hun resultaten in een Google Doc krijgen)</span></div>
+          <p class="manual-students-hint" style="margin:0 0 8px">Plak de <strong>korte naam</strong> van deze Moodle-cursus. Je kan dit ook later doen in Instellingen → Cursistendocs.</p>
+          <div id="wizard-docs-code"></div>
+        </div>
       </div>
 
       <!-- Step 2 — Welcome + import cursisten -->
@@ -4796,7 +4827,7 @@ const STORAGE_PREFIX = 'groeimeter_v1_'; // followed by Moodle courseId
 // hebt. Reden: in september bleek een fix van 20 juli stilletjes verdwenen
 // omdat er twee bestandslijnen naast elkaar liepen en niets aan het
 // bestand verried welke build het was.
-const BUILD = '2026-10-13b';
+const BUILD = '2026-10-14a';
 
 // ============================================================
 // 3.2 MOODLE BRIDGE — placeholders
@@ -5961,8 +5992,58 @@ const COURSE_STATE_LABEL = {
   pending: 'Nog niet beoordeeld'
 };
 
+// ----- Rapport als blokken (bouw A2, okt 2026) -------------------------
+// Eén opbouw, twee weergaven: het pdf hieronder én het cursistendoc (webapp)
+// tekenen dezelfde blokken. Alle omzetting naar woorden (formatScore,
+// COURSE_STATE_LABEL) gebeurt HIER, zodat het doc nooit eigen regels krijgt
+// die uit de pas lopen met de app. Volgorde = leesvolgorde.
+const REPORT_VIEW_VERSION = 1;
+
+function cursistReportView (studentId) {
+  const d = cursistReportData(studentId);
+  const B = [];
+  B.push({ t: 'name',   text: d.student.fullName });
+  B.push({ t: 'course', text: d.course.name || '' });
+  B.push({ t: 'meta',
+           text: (d.course.startYMD && d.course.endYMD)
+             ? 'Cursusperiode ' + formatYMD(d.course.startYMD) + ' – ' + formatYMD(d.course.endYMD)
+             : 'Cursusperiode niet ingesteld',
+           generatedYMD: d.generatedYMD });
+  B.push({ t: 'stamp',  kind: d.released.confirmed ? 'definitief' : 'voorlopig' });
+  B.push({ t: 'total',  text: 'Resultaat van de cursus',
+           right: COURSE_STATE_LABEL[d.status.state] || '—', cls: d.status.state,
+           sub: d.status.passingCount + ' van de ' + d.status.totalCount + ' competenties behaald.'
+              + (d.status.override ? ' Dit resultaat is een beslissing van de lesgever.' : '') });
+  if (d.absences > 0) {
+    B.push({ t: 'para', text: 'Afwezig bij ' + d.absences + (d.absences === 1 ? ' beoordeling.' : ' beoordelingen.') });
+  }
+  d.courseFeedback.forEach(f => {
+    B.push({ t: 'feedback', level: 0, text: f.text,
+             date: f.date ? formatYMD(String(f.date).slice(0, 10)) : null });
+  });
+  B.push({ t: 'section', text: 'Competenties' });
+  d.competencies.forEach(comp => {
+    const cf = formatScore(comp.score);
+    B.push({ t: 'comp', text: comp.name, note: comp.mandatory ? 'verplicht te behalen' : null,
+             right: cf.label, cls: cf.class });
+    comp.feedback.forEach(f => B.push({ t: 'feedback', level: 1, text: f.text }));
+    comp.leerdoelen.forEach(ld => {
+      const lf = formatScore(ld.score);
+      B.push({ t: 'ld', text: ld.name, note: ld.counts ? null : 'telt niet mee',
+               right: ld.counts ? lf.label : '—', cls: ld.counts ? lf.class : 'muted' });
+      ld.feedback.forEach(f => B.push({ t: 'feedback', level: 2, text: f.text }));
+    });
+    B.push({ t: 'compEnd' });
+  });
+  const view = { version: REPORT_VIEW_VERSION, blocks: B };
+  // Wat de cursist echt ziet, wordt nog eens gecontroleerd.
+  assertSingleStudent({ student: { id: studentId }, blocks: B }, studentId);
+  return { data: d, view: view };
+}
+
 function generateCursistReport (studentId) {
-  const d     = cursistReportData(studentId);
+  const built = cursistReportView(studentId);
+  const d     = built.data;
   const JsPDF = jsPDFCtor();
   const doc   = new JsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait', compress: true });
   registerReportFonts(doc);
@@ -5986,10 +6067,11 @@ function generateCursistReport (studentId) {
   // Kleur volgt de klasse uit formatScore(), niet isPassing(). "Bijna behaald"
   // is geen fout resultaat en mag dus niet in de faalkleur staan — dat is
   // dezelfde visuele taal als in de app zelf.
-  const scoreColor = f => f.class === 'pending' ? C.text3
-                        : f.class === 'fail'    ? C.fail
-                        : f.class === 'almost'  ? C.warn
-                        : C.pass;
+  const scoreColor = cls => cls === 'pending' ? C.text3
+                          : cls === 'muted'   ? C.text3
+                          : cls === 'fail'    ? C.fail
+                          : cls === 'almost'  ? C.warn
+                          : C.pass;
 
   let y = MT;
 
@@ -6057,86 +6139,79 @@ function generateCursistReport (studentId) {
     y += (gap === undefined ? 4 : gap);
   };
 
+  const withNote = b => b.text + (b.note ? '  (' + b.note + ')' : '');
+
   // ── Kop ───────────────────────────────────────────────────────────
   font('normal', 8, C.brand);
   doc.text('GROEIMETER', ML, y); y += 7;
 
-  font('bold', 19, C.text);
-  doc.splitTextToSize(d.student.fullName, CW).forEach(l => { doc.text(l, ML, y); y += 8; });
-
-  para(d.course.name, { size: 11, color: C.text2, gap: 1.5 });
-
-  const periode = (d.course.startYMD && d.course.endYMD)
-    ? 'Cursusperiode ' + formatYMD(d.course.startYMD) + ' – ' + formatYMD(d.course.endYMD)
-    : 'Cursusperiode niet ingesteld';
-  para(periode + '   ·   Aangemaakt op ' + formatYMD(d.generatedYMD),
-       { size: 8.5, color: C.text3, gap: 3 });
-
-  if (!d.released.confirmed) {
-    font('bold', 9, C.warn);
-    doc.text('VOORLOPIG — de lesgever heeft de eindresultaten nog niet bevestigd.', ML, y);
-    y += 6;
-  }
-
-  hr(6);
-
-  // ── Cursustotaal ──────────────────────────────────────────────────
-  font('bold', 13, C.text);
-  doc.text('Resultaat van de cursus', ML, y);
-  font('bold', 13, stateColor(d.status.state));
-  doc.text(COURSE_STATE_LABEL[d.status.state] || '—', W - MR, y, { align: 'right' });
-  y += 6.5;
-
-  para(d.status.passingCount + ' van de ' + d.status.totalCount + ' competenties behaald.'
-       + (d.status.override ? ' Dit resultaat is een beslissing van de lesgever.' : ''),
-       { size: 9.5, color: C.text2, gap: 2 });
-
-  if (d.absences > 0) {
-    para('Afwezig bij ' + d.absences + (d.absences === 1 ? ' beoordeling.' : ' beoordelingen.'),
-         { size: 9.5, color: C.text2, gap: 2 });
-  }
-
-  d.courseFeedback.forEach(f => {
-    para(f.text, { size: 9.5, color: C.text2, indent: 4, rule: true });
-    if (f.date) para(formatYMD(String(f.date).slice(0, 10)),
-                     { size: 7.5, color: C.text3, indent: 4, rule: true, gap: 1.5 });
-  });
-
-  y += 3;
-  hr(6);
-
-  // ── Competenties ──────────────────────────────────────────────────
-  font('bold', 13, C.text);
-  need(9);
-  doc.text('Competenties', ML, y);
-  y += 7;
-
-  d.competencies.forEach((comp, ci) => {
-    need(14);
-    if (ci > 0) y += 2;
-
-    const cf = formatScore(comp.score);
-    row(comp.name + (comp.mandatory ? '  (verplicht te behalen)' : ''), cf.label,
-        { size: 11, style: 'bold', rightColor: scoreColor(cf) });
-    y += 1.5;
-
-    comp.feedback.forEach(f => {
-      para(f.text, { size: 9, color: C.text2, indent: 4, rule: true, gap: 1.5 });
-    });
-
-    comp.leerdoelen.forEach(ld => {
-      const lf = formatScore(ld.score);
-      row(ld.name + (ld.counts ? '' : '  (telt niet mee)'),
-          ld.counts ? lf.label : '—',
-          { size: 9.5, indent: 8, color: C.text2,
-            rightColor: ld.counts ? scoreColor(lf) : C.text3 });
-      ld.feedback.forEach(f => {
-        para(f.text, { size: 8.5, color: C.text3, indent: 12, rule: true, gap: 1 });
-      });
-    });
-
-    y += 2;
-    hr(3);
+  let compIndex = 0;
+  built.view.blocks.forEach(b => {
+    switch (b.t) {
+      case 'name':
+        font('bold', 19, C.text);
+        doc.splitTextToSize(b.text, CW).forEach(l => { doc.text(l, ML, y); y += 8; });
+        break;
+      case 'course':
+        para(b.text, { size: 11, color: C.text2, gap: 1.5 });
+        break;
+      case 'meta':
+        para(b.text + '   ·   Aangemaakt op ' + formatYMD(b.generatedYMD),
+             { size: 8.5, color: C.text3, gap: 3 });
+        break;
+      case 'stamp':
+        if (b.kind === 'voorlopig') {
+          font('bold', 9, C.warn);
+          doc.text('VOORLOPIG — de lesgever heeft de eindresultaten nog niet bevestigd.', ML, y);
+          y += 6;
+        }
+        break;
+      case 'total':
+        hr(6);
+        font('bold', 13, C.text);
+        doc.text(b.text, ML, y);
+        font('bold', 13, stateColor(b.cls));
+        doc.text(b.right, W - MR, y, { align: 'right' });
+        y += 6.5;
+        para(b.sub, { size: 9.5, color: C.text2, gap: 2 });
+        break;
+      case 'para':
+        para(b.text, { size: 9.5, color: C.text2, gap: 2 });
+        break;
+      case 'feedback':
+        if (b.level === 0) {
+          para(b.text, { size: 9.5, color: C.text2, indent: 4, rule: true });
+          if (b.date) para(b.date, { size: 7.5, color: C.text3, indent: 4, rule: true, gap: 1.5 });
+        } else if (b.level === 1) {
+          para(b.text, { size: 9, color: C.text2, indent: 4, rule: true, gap: 1.5 });
+        } else {
+          para(b.text, { size: 8.5, color: C.text3, indent: 12, rule: true, gap: 1 });
+        }
+        break;
+      case 'section':
+        y += 3;
+        hr(6);
+        font('bold', 13, C.text);
+        need(9);
+        doc.text(b.text, ML, y);
+        y += 7;
+        break;
+      case 'comp':
+        need(14);
+        if (compIndex > 0) y += 2;
+        compIndex++;
+        row(withNote(b), b.right, { size: 11, style: 'bold', rightColor: scoreColor(b.cls) });
+        y += 1.5;
+        break;
+      case 'ld':
+        row(withNote(b), b.right,
+            { size: 9.5, indent: 8, color: C.text2, rightColor: scoreColor(b.cls) });
+        break;
+      case 'compEnd':
+        y += 2;
+        hr(3);
+        break;
+    }
   });
 
   // ── Voettekst op elke pagina ──────────────────────────────────────
@@ -6428,6 +6503,8 @@ function openWizard () {
     startYMD:            App.data?.settings?.period?.startYMD || gmTodayYMD(),
     endYMD:              App.data?.settings?.period?.endYMD   || ''
   };
+  DOCS_CODE_INPUT.wizard   = App.data?.settings?.docs?.shortName || '';
+  DOCS_CODE_CHECKED.wizard = !!App.data?.settings?.docs?.confirmedAt;
   document.getElementById('wizard-course-name').textContent = App.data.courseName;
   renderWizardProgress();
   goToWizardStep(1);
@@ -6521,12 +6598,14 @@ function enterStepPeriod () {
   w.startYMD  = start.value;   // keep state and field in sync
   w.endYMD    = end.value;
   renderWizardPeriodFeedback();
+  renderWizardDocsCode();
 }
 
 function wizardPeriodChanged () {
   App.wizard.startYMD = document.getElementById('wizard-start-date').value || '';
   App.wizard.endYMD   = document.getElementById('wizard-end-date').value   || '';
   renderWizardPeriodFeedback();
+  renderWizardDocsCode();
   validateWizardStep();
 }
 
@@ -6592,8 +6671,15 @@ async function wizardImportStudents () {
   button.textContent = 'Bezig…';
   try {
     const students = await Groeimeter.moodle.getCourseStudents(App.context.courseId);
-    App.wizard.importedStudents = students;
-    toast(`${students.length} cursisten geïmporteerd`, 'success');
+    // Handmatig toegevoegde cursisten blijven staan (bouw A2). Alleen wie met
+    // hetzelfde e-mailadres ook uit Moodle komt, valt weg: de Moodle-versie wint.
+    const moodleMails = new Set(students.map(s => normalizeEmail(s.email)).filter(Boolean));
+    const moodleIds   = new Set(students.map(s => s.id));
+    const keptManual  = (App.wizard.importedStudents || []).filter(s =>
+      s.manual && !moodleIds.has(s.id) && !(normalizeEmail(s.email) && moodleMails.has(normalizeEmail(s.email))));
+    App.wizard.importedStudents = students.concat(keptManual);
+    toast(`${students.length} cursisten geïmporteerd`
+          + (keptManual.length ? ` · ${keptManual.length} handmatig toegevoegde behouden` : ''), 'success');
     enterStepStudents();
     validateWizardStep();
   } catch (e) {
@@ -7679,6 +7765,10 @@ function enterStepSummary () {
       <span class="settings-row-value">${formatYMD(w.startYMD)} → ${formatYMD(w.endYMD)}</span>
     </div>
     <div class="settings-row">
+      <span class="settings-row-label">Cursuscode (cursistendocs)</span>
+      <span class="settings-row-value">${ (function(){ const d = docsFromInput('wizard'); return d ? '<span class="docs-code">' + escapeHtml(d.courseCode) + '</span> · ' + escapeHtml(d.schoolYear) : 'niet ingevuld'; })() }</span>
+    </div>
+    <div class="settings-row">
       <span class="settings-row-label">Cursisten</span>
       <span class="settings-row-value">${w.importedStudents.length} geïmporteerd</span>
     </div>
@@ -7730,6 +7820,11 @@ function completeWizard () {
   if (!App.data.settings.release) {
     App.data.settings.release = { confirmed: false, atISO: null, by: null, forEndYMD: null };
   }
+  if (!App.data.settings.docs) App.data.settings.docs = blankDocsSettings();
+  // Cursuscode (optioneel). Een vergrendelde code wordt nooit door de wizard
+  // overschreven: corrigeren gaat via de webapp.
+  const wizDocs = docsFromInput('wizard');
+  if (wizDocs && !App.data.settings.docs.lockedAt) Object.assign(App.data.settings.docs, wizDocs);
   App.data.setupComplete  = true;
   App.data.setupDate      = new Date().toISOString();
   if (!persist()) return; // toast was already shown by persist()
@@ -7756,6 +7851,9 @@ function openSettings () {
 function closeSettings () {
   hideModal('settings-modal');
   SETTINGS_DRAFT = null;
+  DOCS_CODE_INPUT.settings = null;
+  DOCS_CODE_CHECKED.settings = false;
+  DOCS_EXPORT_NOTICE = false;
   // De selectie is een keuze van dit moment, geen instelling: ze mag niet
   // blijven hangen tot de volgende keer.
   clearReportSelection();
@@ -7874,6 +7972,11 @@ function renderSettings () {
     <div class="settings-section">
       <div class="settings-section-title">Rapporten (pdf)</div>
       ${reportsSettingsHtml()}
+    </div>
+
+    <div class="settings-section" id="settings-docs-section">
+      <div class="settings-section-title">Cursistendocs</div>
+      ${docsSettingsHtml()}
     </div>
 
     <div class="settings-section">
@@ -8198,7 +8301,11 @@ function saveSettings () {
   const endAfter  = per.endYMD;
   const releaseMoved = courseRelease().confirmed && endBefore && endAfter && endBefore !== endAfter;
 
+  // settings.docs wordt live bijgehouden (bevestigen, export, vergrendelen);
+  // de kopie van Instellingen mag dat nooit terugdraaien.
+  const liveDocs = App.data.settings.docs;
   App.data.settings = JSON.parse(JSON.stringify(SETTINGS_DRAFT));
+  if (liveDocs) App.data.settings.docs = liveDocs;
   if (!persist()) return;
   closeSettings();
   if (releaseMoved) {
@@ -10321,6 +10428,7 @@ function studentListHtml () {
     sub.push(mail ? '<span class="mono">' + escapeHtml(mail) + '</span>' : 'geen e-mail');
     if (mail && !isCursistEmail(mail)) sub.push('geen @cursist-adres');
     sub.push(st.manual ? 'handmatig' : 'uit Moodle');
+    if (st.docAccess === 'revoked') sub.push('<strong>toegang tot doc ingetrokken</strong>');
     const editing = STU_EDIT_ID === st.id;
     return '<div class="stu-row">'
          +   '<div class="stu-row-top">'
@@ -10353,6 +10461,14 @@ function studentEditHtml (st) {
        +     '<div class="stu-edit-note">Verschijnt achter de naam in jouw schermen, nooit bij de cursist. '
        +       'Handig als twee cursisten dezelfde naam hebben. Vul hier geen persoonlijke of gevoelige '
        +       'informatie in (gezondheid, gedrag, …).</div></div>'
+       +   (isCursistEmail(st.email)
+             ? '<div><label>Cursistendoc</label>'
+               + '<button class="btn btn-sm" onclick="toggleDocAccess(\'' + escAttr(st.id) + '\')">'
+               + (st.docAccess === 'revoked' ? 'Toegang tot doc herstellen' : 'Toegang tot doc intrekken') + '</button>'
+               + '<div class="stu-edit-note">' + (st.docAccess === 'revoked'
+                   ? 'Ingetrokken op ' + escapeHtml(formatYMD(st.docAccessAt || gmTodayYMD())) + '. De resultaten in de Groeimeter blijven bewaard.'
+                   : 'Gaat in bij je volgende export. De resultaten in de Groeimeter blijven bewaard.') + '</div></div>'
+             : '')
        +   '<div class="stu-edit-actions">'
        +     '<button class="btn btn-sm" onclick="closeStudentEdit()">Annuleren</button>'
        +     '<button class="btn btn-sm btn-primary" onclick="saveStudentEdit(\'' + escAttr(st.id) + '\')">Opslaan</button>'
@@ -10403,6 +10519,404 @@ function saveStudentEdit (id) {
   renderSettings();
   renderTeacher();
   toast('Cursist bijgewerkt.', 'success', 2200);
+}
+
+// ============================================================
+// 3.x CURSISTENDOCS — cursuscode, toegang per cursist, export (bouw A2, okt 2026)
+// ============================================================
+// Ontwerp: ontwerp-cursistendocs-batch1..5.md. De Groeimeter maakt hier alleen
+// een exportbestand; delen en bijwerken gebeurt in de webapp (bouw B).
+const CODE_LENGTE_MIN        = 24;   // zelfde waarden als in de webapp!
+const CODE_LENGTE_MAX        = 25;
+const CURSISTENDOCS_URL      = '';   // URL van de webapp; leeg = geen link tonen
+const CURSISTENDOCS_FORMAT   = 2;
+let   DOCS_CODE_INPUT        = { wizard: '', settings: null };  // null = niet aan het wijzigen
+let   DOCS_CODE_CHECKED      = { wizard: false, settings: false };
+let   DOCS_EXPORT_NOTICE     = false;
+
+// Alleen hertekenen als Instellingen open staat.
+function rerenderSettings () { if (SETTINGS_DRAFT) renderSettings(); }
+
+// ----- Korte naam → cursuscode + schooljaar -----
+function schoolYearFromStart (startYMD) {
+  const m = /^(\d{4})-(\d{2})-\d{2}$/.exec(String(startYMD || ''));
+  if (!m) return null;
+  const y = parseInt(m[1], 10), mo = parseInt(m[2], 10);
+  // September–december: nieuw schooljaar. Januari–augustus (ook zomercursussen):
+  // het schooljaar dat in september van vorig jaar begon.
+  return mo >= 9 ? (y + '-' + (y + 1)) : ((y - 1) + '-' + y);
+}
+
+function parseShortName (raw, startYMD) {
+  const t = String(raw || '').trim();
+  if (!t) return { ok: false, error: 'Plak de volledige korte naam van de Moodle-cursus.' };
+  const code = t.split(/\s+/)[0];
+  if (!/^[A-Za-z0-9]+$/.test(code)) {
+    return { ok: false, code, error: 'De cursuscode mag alleen letters en cijfers bevatten. '
+                                   + 'Plak de korte naam zoals ze in Moodle staat.' };
+  }
+  if (code.length < CODE_LENGTE_MIN || code.length > CODE_LENGTE_MAX) {
+    return { ok: false, code, error: 'De cursuscode heeft ' + code.length + ' tekens; verwacht '
+           + (CODE_LENGTE_MIN === CODE_LENGTE_MAX ? CODE_LENGTE_MIN : CODE_LENGTE_MIN + ' of ' + CODE_LENGTE_MAX)
+           + '. Kijk na of je de juiste korte naam plakte. Klopt ze toch, neem dan contact op met de beheerder.' };
+  }
+  const years = [];
+  const re = /(?:^|\s)(\d{4})-(\d{4})(?=\s|$)/g;
+  let m;
+  while ((m = re.exec(t)) !== null) years.push([parseInt(m[1], 10), parseInt(m[2], 10)]);
+  if (years.length > 1) {
+    return { ok: false, code, error: 'De korte naam bevat meer dan één schooljaar. Kijk ze na in Moodle of neem contact op met de beheerder.' };
+  }
+  if (years.length === 1) {
+    const [a, b] = years[0];
+    if (b !== a + 1) return { ok: false, code, error: 'Het schooljaar ' + a + '-' + b + ' is ongeldig: het tweede jaar moet één hoger zijn.' };
+    return { ok: true, code, schoolYear: a + '-' + b, source: 'shortname' };
+  }
+  const derived = schoolYearFromStart(startYMD);
+  if (!derived) {
+    return { ok: false, code, error: 'De korte naam bevat geen schooljaar en er is geen startdatum om het uit af te leiden. Vul eerst de cursusperiode in.' };
+  }
+  return { ok: true, code, schoolYear: derived, source: 'startdate' };
+}
+
+// ----- Blok "cursuscode" (wizard stap 1 en Instellingen) -----
+function docsStartYMD (ctx) {
+  if (ctx === 'wizard') return App.wizard && App.wizard.startYMD;
+  return App.data.settings.period && App.data.settings.period.startYMD;
+}
+
+function docsParsePreviewHtml (ctx) {
+  const raw = DOCS_CODE_INPUT[ctx] || '';
+  if (!raw.trim()) return '';
+  const p = parseShortName(raw, docsStartYMD(ctx));
+  if (!p.ok) return '<div class="docs-code-error">' + escapeHtml(p.error) + '</div>';
+  return '<div class="docs-code-result">'
+       +   '<div><span class="docs-k">Cursuscode</span> <span class="docs-code">' + escapeHtml(p.code) + '</span></div>'
+       +   '<div><span class="docs-k">Schooljaar</span> <strong>' + escapeHtml(p.schoolYear) + '</strong> '
+       +     (p.source === 'shortname'
+               ? '<span class="docs-src">(uit de korte naam)</span>'
+               : '<span class="docs-src docs-src-warn">(afgeleid uit de startdatum — kijk dit na)</span>')
+       +   '</div>'
+       +   '<label class="docs-confirm"><input type="checkbox" ' + (DOCS_CODE_CHECKED[ctx] ? 'checked ' : '')
+       +     'onchange="docsCodeCheck(\'' + ctx + '\', this.checked)"> '
+       +     'Code en schooljaar kloppen voor deze cursus.</label>'
+       + '</div>';
+}
+
+function docsCodeInputHtml (ctx) {
+  return '<input type="text" class="input docs-code-input" id="' + ctx + '-docs-shortname" autocomplete="off" spellcheck="false" '
+       +   'value="' + escAttr(DOCS_CODE_INPUT[ctx] || '') + '" '
+       +   'placeholder="bv. AAVAAVO00WiskBasHVrVm09GE 2026-2027 sem1 k1 …" '
+       +   'oninput="docsCodeTyped(\'' + ctx + '\', this.value)">'
+       + '<div id="' + ctx + '-docs-preview">' + docsParsePreviewHtml(ctx) + '</div>';
+}
+
+function docsCodeTyped (ctx, value) {
+  DOCS_CODE_INPUT[ctx] = value;
+  DOCS_CODE_CHECKED[ctx] = false;      // elke wijziging vraagt een nieuwe bevestiging
+  const host = document.getElementById(ctx + '-docs-preview');
+  if (host) host.innerHTML = docsParsePreviewHtml(ctx);
+  if (ctx === 'settings') { const b = document.getElementById('settings-docs-save'); if (b) b.disabled = true; }
+}
+
+function docsCodeCheck (ctx, checked) {
+  DOCS_CODE_CHECKED[ctx] = !!checked;
+  if (ctx === 'settings') { const b = document.getElementById('settings-docs-save'); if (b) b.disabled = !checked; }
+}
+
+// Wizard: wordt aangeroepen vanuit enterStepPeriod / wizardPeriodChanged.
+function renderWizardDocsCode () {
+  const host = document.getElementById('wizard-docs-code');
+  if (!host) return;
+  // De terugvalregel hangt van de startdatum af: bij een gewijzigde startdatum
+  // opnieuw uitrekenen en de bevestiging laten vervallen.
+  const prev = host.getAttribute('data-start');
+  if (prev !== null && prev !== String(App.wizard.startYMD || '')) DOCS_CODE_CHECKED.wizard = false;
+  host.setAttribute('data-start', String(App.wizard.startYMD || ''));
+  const keepFocus = document.activeElement && document.activeElement.id === 'wizard-docs-shortname';
+  if (keepFocus) {
+    const prevBox = document.getElementById('wizard-docs-preview');
+    if (prevBox) prevBox.innerHTML = docsParsePreviewHtml('wizard');
+    return;
+  }
+  host.innerHTML = docsCodeInputHtml('wizard');
+}
+
+function docsFromInput (ctx) {
+  if (!DOCS_CODE_CHECKED[ctx]) return null;
+  const raw = DOCS_CODE_INPUT[ctx] || '';
+  const p = parseShortName(raw, docsStartYMD(ctx));
+  if (!p.ok) return null;
+  return { shortName: raw.trim(), courseCode: p.code, schoolYear: p.schoolYear,
+           schoolYearSource: p.source, confirmedAt: new Date().toISOString() };
+}
+
+// Schrijft live naar App.data.settings.docs én naar de kopie van Instellingen,
+// zodat een latere "Opslaan" van Instellingen dit niet overschrijft.
+function docsWrite (patch) {
+  const docs = App.data.settings.docs || (App.data.settings.docs = blankDocsSettings());
+  Object.assign(docs, patch);
+  if (typeof SETTINGS_DRAFT !== 'undefined' && SETTINGS_DRAFT) SETTINGS_DRAFT.docs = JSON.parse(JSON.stringify(docs));
+  return persist();
+}
+
+function docsSaveSettingsCode () {
+  const d = docsFromInput('settings');
+  if (!d) { toast('Vink eerst aan dat code en schooljaar kloppen.', 'warning'); return; }
+  if (!docsWrite(d)) return;
+  DOCS_CODE_INPUT.settings = null;
+  DOCS_CODE_CHECKED.settings = false;
+  rerenderSettings();
+  toast('Cursuscode bevestigd.', 'success', 2400);
+}
+
+function docsStartEdit () {
+  const docs = App.data.settings.docs || {};
+  if (docs.lockedAt) return;
+  DOCS_CODE_INPUT.settings = docs.shortName || '';
+  DOCS_CODE_CHECKED.settings = false;
+  rerenderSettings();
+}
+function docsCancelEdit () { DOCS_CODE_INPUT.settings = null; DOCS_CODE_CHECKED.settings = false; rerenderSettings(); }
+
+function docsUnlock () {
+  const ok = confirm('Cursuscode ontgrendelen?\n\n'
+    + 'De docs van je cursisten zijn al gekoppeld aan deze code. Een andere code hier invullen verandert '
+    + 'die koppeling NIET: de webapp zal je volgende export weigeren. Een code corrigeren doe je in de '
+    + 'webapp, met "Cursuscode corrigeren".\n\nOntgrendel hier alleen als de beheerder je dat vraagt.');
+  if (!ok) return;
+  if (!docsWrite({ lockedAt: null })) return;
+  rerenderSettings();
+}
+
+// ----- Doc-status per cursist -----
+function docStatusOf (st, dupEmails) {
+  const mail = normalizeEmail(st.email);
+  if (st.docAccess === 'revoked')         return { key: 'revoked', text: 'toegang tot doc ingetrokken' };
+  if (!mail)                              return { key: 'nomail',  text: 'geen e-mail' };
+  if (!isCursistEmail(mail))              return { key: 'invalid', text: 'geen @cursist-adres' };
+  if (dupEmails && dupEmails.has(mail))   return { key: 'dup',     text: 'dubbel e-mailadres' };
+  return { key: 'ok', text: 'krijgt een doc' };
+}
+
+function dupEmailSet () {
+  return new Set(duplicateEmailGroups(App.data.students).map(g => g.email));
+}
+
+function toggleDocAccess (id) {
+  const st = (App.data.students || []).find(x => x.id === id);
+  if (!st) return;
+  const name = studentLabel(st);
+  if (st.docAccess === 'revoked') {
+    if (!confirm(name + ' krijgt bij je volgende export opnieuw toegang tot zijn doc.\n\nToegang herstellen?')) return;
+    delete st.docAccess;
+    delete st.docAccessAt;
+  } else {
+    if (!confirm(name + ' kan zijn doc niet meer lezen vanaf je volgende export. Zijn resultaten in de '
+               + 'Groeimeter blijven bewaard. Je kan dit later ongedaan maken.\n\nToegang intrekken?')) return;
+    st.docAccess   = 'revoked';
+    st.docAccessAt = gmTodayYMD();
+  }
+  if (!persist()) return;
+  rerenderSettings();
+}
+
+// ----- Export -----
+function docsExportProblems () {
+  const docs = (App.data.settings && App.data.settings.docs) || {};
+  const out  = [];
+  if (!docs.confirmedAt || !docs.courseCode || !docs.schoolYear) {
+    out.push('Bevestig eerst de cursuscode en het schooljaar (hierboven).');
+  }
+  if (!App.data.courseId) out.push('Deze cursus heeft geen Moodle-cursus-ID.');
+  const dups = duplicateEmailGroups(App.data.students);
+  if (dups.length) {
+    out.push('Een e-mailadres komt meer dan één keer voor (' + dups.map(g => g.email).join(', ')
+           + '). Pas dit aan in de cursistenlijst.');
+  }
+  const ds = dupEmailSet();
+  if (!(App.data.students || []).some(st => docStatusOf(st, ds).key === 'ok')) {
+    out.push('Geen enkele cursist heeft een geldig @cursist-adres.');
+  }
+  return out;
+}
+
+function buildDocsExport () {
+  const problems = docsExportProblems();
+  if (problems.length) return { ok: false, problems };
+
+  const docs = App.data.settings.docs;
+  const per  = coursePeriod();
+  const rel  = courseRelease();
+  const ds   = dupEmailSet();
+  const cursisten = [], revoked = [], withoutDoc = [], failed = [];
+
+  (App.data.students || []).forEach(st => {
+    const status = docStatusOf(st, ds);
+    const name   = studentFullName(st);
+    if (status.key === 'revoked') {
+      if (isCursistEmail(st.email)) revoked.push({ email: normalizeEmail(st.email), since: st.docAccessAt || null });
+      return;
+    }
+    if (status.key !== 'ok') { withoutDoc.push({ name, reason: status.text }); return; }
+    let built;
+    try { built = cursistReportView(st.id); }
+    catch (e) {
+      withoutDoc.push({ name, reason: 'controle mislukt' });
+      failed.push({ name, message: e.message });
+      return;
+    }
+    cursisten.push({
+      email:          normalizeEmail(st.email),
+      previousEmails: (st.previousEmails || []).map(normalizeEmail).filter(Boolean),
+      student:        { id: st.id, fullName: name },
+      viewVersion:    built.view.version,
+      view:           built.view.blocks
+    });
+  });
+
+  let activeEntriesCount = 0;
+  (App.data.students || []).forEach(st => {
+    (App.data.competencies || []).filter(c => c.parentId).forEach(k => {
+      activeEntriesCount += activeEntries((App.data.grades || {})[st.id + '_' + k.id] || []).length;
+    });
+  });
+
+  const bundle = {
+    groeimeter:    'cursistendocs',
+    formatVersion: CURSISTENDOCS_FORMAT,
+    build:         BUILD,
+    exportedAt:    new Date().toISOString(),
+    course: {
+      moodleCourseId:   String(App.data.courseId),
+      courseName:       App.data.courseName || '',
+      courseCode:       docs.courseCode,
+      schoolYear:       docs.schoolYear,
+      schoolYearSource: docs.schoolYearSource,
+      startYMD:         per.startYMD || null,
+      endYMD:           per.endYMD || null
+    },
+    release: { confirmed: !!rel.confirmed, atISO: rel.atISO || null },
+    counts: {
+      students:      (App.data.students || []).length,
+      withDoc:       cursisten.length,
+      activeTests:   (App.data.tests || []).filter(t => !t.archived).length,
+      activeEntries: activeEntriesCount
+    },
+    cursisten, revoked, withoutDoc
+  };
+  return { ok: true, bundle, failed };
+}
+
+function docsExportFileName (bundle) {
+  const d = new Date(bundle.exportedAt);
+  const p = n => String(n).padStart(2, '0');
+  const stamp = gmTodayYMD() + ' ' + p(d.getHours()) + p(d.getMinutes());
+  return 'Groeimeter cursistendocs — ' + bundle.course.courseCode + ' — ' + stamp + '.json';
+}
+
+function exportCursistendocs () {
+  const res = buildDocsExport();
+  if (!res.ok) { toast(res.problems[0], 'warning', 6000); rerenderSettings(); return; }
+  if (res.failed.length) {
+    const lines = res.failed.map(f => '• ' + f.name).join('\n');
+    const ok = confirm('Voor deze cursisten wordt GEEN doc gemaakt, omdat hun rapport gegevens van een '
+                     + 'andere cursist bevat (bv. een e-mailadres in feedback):\n\n' + lines
+                     + '\n\nPas die feedback later aan. De export voor de andere cursisten toch maken?');
+    if (!ok) return;
+  }
+  const json = JSON.stringify(res.bundle, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url;
+  a.download = docsExportFileName(res.bundle);
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+  const docs = App.data.settings.docs;
+  const patch = { lastExportAt: res.bundle.exportedAt };
+  if (!docs.lockedAt) patch.lockedAt = res.bundle.exportedAt;
+  docsWrite(patch);
+  DOCS_EXPORT_NOTICE = true;
+  rerenderSettings();
+}
+
+function dismissDocsExportNotice () { DOCS_EXPORT_NOTICE = false; rerenderSettings(); }
+
+// ----- Sectie "Cursistendocs" in Instellingen -----
+function docsSettingsHtml () {
+  const docs = (App.data.settings && App.data.settings.docs) || blankDocsSettings();
+  let codeHtml;
+  const editing = DOCS_CODE_INPUT.settings !== null;
+
+  if (docs.lockedAt) {
+    codeHtml = '<div class="docs-code-result">'
+      + '<div><span class="docs-k">Cursuscode</span> <span class="docs-code">' + escapeHtml(docs.courseCode || '') + '</span></div>'
+      + '<div><span class="docs-k">Schooljaar</span> <strong>' + escapeHtml(docs.schoolYear || '') + '</strong></div>'
+      + '<div class="docs-lock">🔒 Vergrendeld sinds je eerste export (' + escapeHtml(formatYMD(String(docs.lockedAt).slice(0, 10))) + ').'
+      + ' <button class="btn btn-sm" onclick="docsUnlock()">Ontgrendelen…</button></div>'
+      + '</div>';
+  } else if (docs.confirmedAt && !editing) {
+    codeHtml = '<div class="docs-code-result">'
+      + '<div><span class="docs-k">Cursuscode</span> <span class="docs-code">' + escapeHtml(docs.courseCode || '') + '</span></div>'
+      + '<div><span class="docs-k">Schooljaar</span> <strong>' + escapeHtml(docs.schoolYear || '') + '</strong>'
+      + (docs.schoolYearSource === 'startdate' ? ' <span class="docs-src">(afgeleid uit de startdatum)</span>' : '') + '</div>'
+      + '<div style="margin-top:6px"><button class="btn btn-sm" onclick="docsStartEdit()">Wijzigen</button></div>'
+      + '</div>';
+  } else {
+    if (!editing) DOCS_CODE_INPUT.settings = '';
+    codeHtml = '<label class="manual-students-label" for="settings-docs-shortname">Plak de <strong>korte naam</strong> van deze Moodle-cursus</label>'
+      + docsCodeInputHtml('settings')
+      + '<div class="docs-actions">'
+      + (docs.confirmedAt ? '<button class="btn btn-sm" onclick="docsCancelEdit()">Annuleren</button>' : '')
+      + '<button class="btn btn-sm btn-primary" id="settings-docs-save" onclick="docsSaveSettingsCode()"'
+      + (DOCS_CODE_CHECKED.settings ? '' : ' disabled') + '>Bevestigen</button></div>';
+  }
+
+  const ds = dupEmailSet();
+  const counts = { ok: 0, nomail: 0, invalid: 0, dup: 0, revoked: 0 };
+  const noDoc = [];
+  (App.data.students || []).forEach(st => {
+    const s = docStatusOf(st, ds);
+    counts[s.key]++;
+    if (s.key !== 'ok' && s.key !== 'revoked') noDoc.push(studentLabel(st) + ' — ' + s.text);
+  });
+  const summary = [counts.ok + ' krijgen een doc'];
+  if (counts.nomail)  summary.push(counts.nomail + ' zonder e-mail');
+  if (counts.invalid) summary.push(counts.invalid + ' zonder @cursist-adres');
+  if (counts.dup)     summary.push(counts.dup + ' met een dubbel e-mailadres');
+  if (counts.revoked) summary.push(counts.revoked + ' toegang ingetrokken');
+
+  const problems = docsExportProblems();
+  const notice = DOCS_EXPORT_NOTICE
+    ? '<div class="docs-notice" role="status"><strong>Export klaar.</strong> Open de webapp, kies '
+      + '"Cursistendocs bijwerken" en upload dit bestand.<br>Dit bestand bevat de resultaten van al je '
+      + 'cursisten. <strong>Verwijder het uit je Downloads</strong> zodra het geüpload is.'
+      + '<div style="margin-top:8px"><button class="btn btn-sm" onclick="dismissDocsExportNotice()">Begrepen</button></div></div>'
+    : '';
+
+  return '<p class="docs-intro">Geef je cursisten hun resultaten in een eigen Google Doc. '
+       + 'Alleen nodig als je opleiding cursistendocs gebruikt. Wat je exporteert, kunnen je cursisten lezen, '
+       + 'ook vóór de vrijgave (dan met de vermelding VOORLOPIG).</p>'
+       + codeHtml
+       + '<div class="docs-summary">' + escapeHtml(summary.join(' · ')) + '</div>'
+       + (noDoc.length ? '<details class="docs-nodoc"><summary>Wie krijgt geen doc? (' + noDoc.length + ')</summary><ul>'
+            + noDoc.map(x => '<li>' + escapeHtml(x) + '</li>').join('') + '</ul>'
+            + '<div class="stu-edit-note">Aanpassen via Cursisten → Cursistenlijst.</div></details>' : '')
+       + notice
+       + '<div class="docs-actions" style="justify-content:flex-start">'
+       +   '<button class="btn btn-sm btn-primary" onclick="exportCursistendocs()"' + (problems.length ? ' disabled' : '') + '>'
+       +     '⬇ Exporteren voor cursistendocs</button>'
+       +   (CURSISTENDOCS_URL ? '<a class="btn btn-sm" href="' + escAttr(CURSISTENDOCS_URL) + '" target="_blank" rel="noopener">Webapp openen</a>' : '')
+       + '</div>'
+       + (problems.length ? '<ul class="docs-problems">' + problems.map(x => '<li>' + escapeHtml(x) + '</li>').join('') + '</ul>' : '')
+       + '<ol class="docs-steps"><li>Exporteer hier.</li><li>Open de webapp en kies "Cursistendocs bijwerken".</li>'
+       +   '<li>Upload het bestand en kijk het controlescherm na.</li><li>Verwijder het bestand uit je Downloads.</li></ol>'
+       + (docs.lastExportAt ? '<div class="docs-last">Laatste export: ' + escapeHtml(formatYMD(String(docs.lastExportAt).slice(0, 10)))
+            + ' om ' + escapeHtml(new Date(docs.lastExportAt).toTimeString().slice(0, 5)) + '</div>' : '');
 }
 
 async function syncCursisten () {
